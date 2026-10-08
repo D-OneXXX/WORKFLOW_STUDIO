@@ -26,6 +26,8 @@ function PaletteItem(props: {
     {
       type: 'button',
       className: 'wfs-palette-item',
+      // Drives the colour dot; see the `[data-kind]` rules in styles.css.
+      'data-kind': kind,
       onClick: () => onAdd(kind),
     },
     h('span', { className: 'wfs-palette-name' }, title),

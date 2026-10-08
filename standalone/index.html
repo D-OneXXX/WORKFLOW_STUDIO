@@ -2,14 +2,21 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流独立版</title>
 <style>
-:root { color-scheme: dark; --dsw-alias-bg-base:#121721; --dsw-alias-bg-layer-1:#1a2230; --dsw-alias-bg-layer-2:#222e40; --dsw-alias-label-primary:#e5edf8; --dsw-alias-label-secondary:#9dacc3; --dsw-alias-border-l1:#334054; --dsw-alias-border-l2:#455269; --dsw-alias-brand-primary:#6e9fff; --dsw-alias-state-success-primary:#73d3aa; --dsw-alias-state-warn-primary:#f0c675; --dsw-alias-state-error-primary:#ff9090; }
-* { box-sizing:border-box; } body { margin:0; background:#121721; color:#e5edf8; font:14px "Segoe UI","Microsoft YaHei",sans-serif; }
-#root { height:100vh; display:flex; flex-direction:column; } .standalone-banner { padding:10px 16px; background:#202c40; border-bottom:1px solid #334054; font-size:12px; }
+/*
+ * Standalone theme declaration.
+ *
+ * The panel reads its colours from `--dsw-alias-*` because inside Harness the
+ * host supplies them. Standalone has no host theme, so this page provides the
+ * values here — the light neutral ramp taken from the workflow-studio v0.1
+ * reference. Swap this one block to retheme the whole app; the panel's own
+ * fallbacks in src/client/styles.css stay untouched.
+ */
+:root { color-scheme: light; --dsw-alias-bg-base:#fafafa; --dsw-alias-bg-layer-1:#ffffff; --dsw-alias-bg-layer-2:#f0f0f0; --dsw-alias-label-primary:#111111; --dsw-alias-label-secondary:#555555; --dsw-alias-label-tertiary:#888888; --dsw-alias-border-l1:#e5e5e5; --dsw-alias-border-l2:#d4d4d4; --dsw-alias-brand-primary:#4f46e5; --dsw-alias-state-success-primary:#16a34a; --dsw-alias-state-warn-primary:#d97706; --dsw-alias-state-error-primary:#d1242f; --dsw-alias-state-info-primary:#3b82f6; }
+* { box-sizing:border-box; } body { margin:0; background:#fafafa; color:#111111; font:13px/1.5 "Segoe UI","Microsoft YaHei",sans-serif; }
+#root { height:100vh; display:flex; flex-direction:column; } .standalone-banner { padding:8px 16px; background:#fffbeb; color:#92400e; border-bottom:1px solid #fde68a; font-size:12px; }
 .wfs-root { flex:1; } button,input,textarea,select { font:inherit; }
-.wfs-root .react-flow__minimap { background:#1a2230; width:120px; height:72px; }
-.wfs-root .react-flow__minimap-mask { fill:#12172199; }
-.wfs-root .react-flow__minimap-node { fill:#6e9fff; }
-.wfs-root .react-flow__controls-button { background:#222e40; color:#e5edf8; border-color:#334054; }
+/* React Flow's own surfaces follow the ramp; its controls follow the panel. */
+.wfs-root .react-flow__minimap-node { fill:#e0e7ff; stroke:#c7d2fe; }
 @media (max-width: 900px) {
   .wfs-root .react-flow__minimap { display:none; }
   .wfs-root .wfs-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(200px,1fr) minmax(120px,1fr); }

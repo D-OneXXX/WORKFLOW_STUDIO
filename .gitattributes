@@ -1,0 +1,11 @@
+# Normalise line endings in the object store so a Windows clone and a POSIX
+# clone produce identical blobs. Without this the repository was committed with
+# `core.autocrlf=true` in effect and every file warns on first checkout.
+* text=auto
+
+# Binary: never diff or rewrite.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gz binary

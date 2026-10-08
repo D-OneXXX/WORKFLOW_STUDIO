@@ -34,12 +34,13 @@ interface PanelProps {
 function Button(props: {
   label: string
   onClick(): void
-  variant?: 'primary' | 'danger'
+  variant?: 'primary' | 'danger' | 'accent'
   disabled?: boolean
 }): React.ReactElement {
   const classes = ['wfs-button']
   if (props.variant === 'primary') classes.push('wfs-button-primary')
   if (props.variant === 'danger') classes.push('wfs-button-danger')
+  if (props.variant === 'accent') classes.push('wfs-button-accent')
   return h(
     'button',
     {
@@ -153,6 +154,8 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
         label: running ? t('run.running') : t('action.run'),
         onClick: () => void state.runWorkflow(),
         disabled: running || state.graph.nodes.length === 0,
+        // The reference paints run green so it never reads as the save action.
+        variant: 'accent',
       }),
     ),
     fileError ? h('div', { className: 'wfs-status wfs-status-error', role: 'alert', style: { padding: '8px 14px' } }, fileError) : null,

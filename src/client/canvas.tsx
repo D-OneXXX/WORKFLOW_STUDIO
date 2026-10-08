@@ -127,7 +127,9 @@ function StudioNodeView({ data, selected }: NodeProps): React.ReactElement {
     )
   }
 
-  return React.createElement('div', { className: classes.join(' ') }, ...body, ...handles)
+  // `data-kind` is the only styling hook the node carries: styles.css maps it to
+  // the kind colour, the badge, and the handle ring, so recolouring stays in CSS.
+  return React.createElement('div', { className: classes.join(' '), 'data-kind': node.kind }, ...body, ...handles)
 }
 
 const NODE_TYPES = { studio: StudioNodeView }
