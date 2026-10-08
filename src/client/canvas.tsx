@@ -4,6 +4,16 @@
  * `Handle` ids are exactly the wire values the compiler expects — `true` and
  * `false` for a branch arm, a single default handle otherwise — so what the user
  * draws is what the compiler reads.
+ *
+ * Selection belongs to the studio state, not to React Flow. The nodes are supplied
+ * from the graph on every render, so a Shift-click or a marquee drag arrives as
+ * `select` changes that are applied straight back through `onSelectMany` — one
+ * code path, and no second copy of "what is selected" to disagree with the first.
+ *
+ * What is drawn is `foldView(graph)`, never the graph itself: a collapsed round is
+ * one block whose stubs stand for its members' outer edges. The block is **not
+ * connectable**, because which member a new edge should reach is not derivable from
+ * a folded group and guessing would edit nodes the user cannot see.
  */
 
 import * as React from 'react'
@@ -24,6 +34,7 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 
+import { foldView, isGroupBlock, type GroupBlock, type ViewNode } from './graph-edit.js'
 import type { NodeKind, WorkflowEdge, WorkflowGraph, WorkflowNode } from './types.js'
 
 /** Data carried by each rendered node. */
@@ -32,6 +43,13 @@ interface StudioNodeData extends Record<string, unknown> {
   label: string
   params: WorkflowNode['params']
   status: 'idle' | 'active' | 'done' | 'error'
+}
+
+/** Data carried by a folded round. */
+interface StudioGroupData extends Record<string, unknown> {
+  label: string
+  count: number
+  kinds: string[]
 }
 
 const KIND_BADGE: Record<NodeKind, string> = {
@@ -132,37 +150,72 @@ function StudioNodeView({ data, selected }: NodeProps): React.ReactElement {
   return React.createElement('div', { className: classes.join(' '), 'data-kind': node.kind }, ...body, ...handles)
 }
 
-const NODE_TYPES = { studio: StudioNodeView }
+/**
+ * A collapsed round: one block standing for the nodes inside it. It shows the
+ * stubs its members have, but accepts no new connection — expand it to wire
+ * through, so a drawn edge always lands on a node the user can see.
+ */
+function StudioGroupView({ data, selected }: NodeProps): React.ReactElement {
+  const group = data as StudioGroupData
+  const classes = ['wfs-group']
+  if (selected) classes.push('wfs-group-selected')
+  return React.createElement(
+    'div',
+    { className: classes.join(' '), 'data-testid': 'group-block' },
+    React.createElement(Handle, { key: 'in', type: 'target', position: Position.Left, id: 'in', isConnectable: false }),
+    React.createElement(Handle, { key: 'out', type: 'source', position: Position.Right, id: 'out', isConnectable: false }),
+    React.createElement('div', { className: 'wfs-group-kind', key: 'k' }, group.kinds.join(' · ').toUpperCase()),
+    React.createElement('div', { className: 'wfs-group-label', key: 'l' }, group.label),
+    React.createElement('div', { className: 'wfs-group-count', key: 'c' }, `${group.count} 个节点`),
+    React.createElement('div', { className: 'wfs-group-hint', key: 'h' }, '双击展开'),
+  )
+}
 
-/** Convert the studio graph into React Flow's shape. */
-function toFlowNodes(
-  graph: WorkflowGraph,
-  selectedId: string | undefined,
+const NODE_TYPES = { studio: StudioNodeView, group: StudioGroupView }
+
+/** Convert one studio node, or one folded block, into React Flow's shape. */
+function toFlowNode(
+  node: ViewNode,
+  index: number,
+  selected: boolean,
   statusOf: (id: string) => StudioNodeData['status'],
-): Node[] {
-  return graph.nodes.map((node, index) => ({
-    id: node.id,
+): Node {
+  if (isGroupBlock(node)) {
+    const block = node as GroupBlock
+    return {
+      id: block.id,
+      type: 'group',
+      position: block.position,
+      selected,
+      draggable: true,
+      data: { label: block.label, count: block.count, kinds: block.kinds } satisfies StudioGroupData,
+    }
+  }
+  const real = node as WorkflowNode
+  return {
+    id: real.id,
     type: 'studio',
-    position: node.position ?? { x: 80 + (index % 4) * 230, y: 80 + Math.floor(index / 4) * 150 },
-    selected: node.id === selectedId,
+    position: real.position ?? { x: 80 + (index % 4) * 230, y: 80 + Math.floor(index / 4) * 150 },
+    selected,
     data: {
-      kind: node.kind,
-      label: node.label ?? node.kind,
-      params: node.params,
-      status: statusOf(node.id),
+      kind: real.kind,
+      label: real.label ?? real.kind,
+      params: real.params,
+      status: statusOf(real.id),
     } satisfies StudioNodeData,
-  }))
+  }
 }
 
 /** Convert the studio edges into React Flow's shape. */
-function toFlowEdges(graph: WorkflowGraph): Edge[] {
+function toFlowEdges(graph: { edges: WorkflowEdge[] }): Edge[] {
   return graph.edges.map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? null,
-    targetHandle: 'in',
-    label: edge.sourceHandle ?? undefined,
+    // A folded block has one stub handle, whatever arm the edge came from.
+    targetHandle: edge.target.startsWith('group:') ? null : 'in',
+    label: edge.source.startsWith('group:') ? undefined : (edge.sourceHandle ?? undefined),
   }))
 }
 
@@ -173,38 +226,59 @@ function edgeId(connection: Connection): string {
 
 interface CanvasProps {
   graph: WorkflowGraph
-  selectedId: string | undefined
+  /** The selected node and block ids, owned by the studio state. */
+  selection: string[]
   statusOf: (id: string) => StudioNodeData['status']
   onSelect(id: string | undefined): void
+  /** Replace the selection after a marquee drag or a multi-click. */
+  onSelectMany(ids: string[]): void
   onConnect(edge: WorkflowEdge): void
   onRemoveEdge(id: string): void
   onRemoveNode(id: string): void
   onMoveNode(id: string, position: { x: number; y: number }): void
+  /** Expand or collapse the round under a double-clicked block. */
+  onToggleGroup(groupId: string, collapsed: boolean): void
+  /** Shown on the block's stubs; the panel owns the wording. */
+  groupHint?: string
 }
 
 function CanvasInner(props: CanvasProps): React.ReactElement {
-  const { graph, selectedId, statusOf } = props
+  const { graph, selection, statusOf } = props
   const flow = useReactFlow()
+  const selected = new Set(selection)
 
+  const view = React.useMemo(() => foldView(graph), [graph])
   const nodes = React.useMemo(
-    () => toFlowNodes(graph, selectedId, statusOf),
-    [graph, selectedId, statusOf],
+    () => view.nodes.map((node, index) => toFlowNode(node, index, selected.has(node.id), statusOf)),
+    [view, selection, statusOf],
   )
-  const edges = React.useMemo(() => toFlowEdges(graph), [graph])
+  const edges = React.useMemo(() => toFlowEdges(view), [view])
 
   const onNodesChange = React.useCallback(
     (changes: NodeChange[]) => {
+      // Selection changes arrive as a batch describing the whole gesture, so the
+      // set is applied once rather than node by node.
+      const selects = changes.filter((change) => change.type === 'select')
+      if (selects.length > 0) {
+        const next = new Set(selection)
+        for (const change of selects) {
+          if (change.type !== 'select') continue
+          if (change.selected) next.add(change.id)
+          else next.delete(change.id)
+        }
+        props.onSelectMany([...next])
+      }
       for (const change of changes) {
         if (change.type === 'position' && change.position !== undefined) {
           props.onMoveNode(change.id, change.position)
         } else if (change.type === 'remove') {
+          // A member of a collapsed round is invisible here, so the Delete key can
+          // only ever address a node the user can see.
           props.onRemoveNode(change.id)
-        } else if (change.type === 'select' && change.selected) {
-          props.onSelect(change.id)
         }
       }
     },
-    [props],
+    [props, selection],
   )
 
   const onEdgesChange = React.useCallback(
@@ -220,6 +294,8 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     (connection: Connection) => {
       if (!connection.source || !connection.target) return
       if (connection.source === connection.target) return
+      // Neither end may be a folded block: see the note on StudioGroupView.
+      if (connection.source.startsWith('group:') || connection.target.startsWith('group:')) return
       props.onConnect({
         id: edgeId(connection),
         source: connection.source,
@@ -228,6 +304,16 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
       })
     },
     [props],
+  )
+
+  const onNodeDoubleClick = React.useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (!node.id.startsWith('group:')) return
+      props.onToggleGroup(node.id.slice('group:'.length), false)
+      // Bring the members into view, so the expansion is not off-screen.
+      void flow.fitView({ nodes: [{ id: node.id }], duration: 200, maxZoom: 1.2 })
+    },
+    [flow, props],
   )
 
   return React.createElement(
@@ -239,8 +325,21 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
       onNodesChange,
       onEdgesChange,
       onConnect,
+      onNodeDoubleClick,
       onPaneClick: () => props.onSelect(undefined),
-      onNodeClick: (_event: React.MouseEvent, node: Node) => props.onSelect(node.id),
+      onNodeClick: (event: React.MouseEvent, node: Node) => {
+        // Only a plain click means "just this one". A modifier click is an additive
+        // gesture, and React Flow has already reported it as a `select` change — which
+        // `onNodesChange` applies — so replacing the set here would undo the add.
+        if (event.shiftKey || event.ctrlKey || event.metaKey) return
+        props.onSelect(node.id)
+      },
+      // Shift drags the marquee, and Ctrl/Cmd-click or Shift-click adds a node to the
+      // selection. Named here so the keys are a decision, not an accident.
+      selectionKeyCode: 'Shift',
+      multiSelectionKeyCode: ['Meta', 'Control', 'Shift'],
+      zoomActivationKeyCode: 'Meta',
+      deleteKeyCode: ['Backspace', 'Delete'],
       fitView: true,
       proOptions: { hideAttribution: true },
       minZoom: 0.25,

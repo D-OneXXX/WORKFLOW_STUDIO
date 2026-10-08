@@ -99,13 +99,74 @@ export function StudioInspector({
   connectors,
   translate,
 }: InspectorProps): React.ReactElement {
-  const { graph, selectedId, t, updateNode, updateParams, removeNode } = state
+  const { graph, selectedId, selectedGroupId, selection, t, updateNode, updateParams, removeNode } = state
   const selected: WorkflowNode | undefined = graph.nodes.find((candidate) => candidate.id === selectedId)
 
-  // Mode is per node and per visit, so it is deliberately not stored on the
-  // node: the document must not grow a field that says which box was open.
+  // Mode is per node and per visit, so it is deliberately not stored on the node:
+  // the document must not grow a field that says which box was open.
   const [modes, setModes] = React.useState<Record<string, ConfigMode>>({})
   const [job, setJob] = React.useState<Job>()
+
+  /** A folded round: its title, and the way back out. */
+  if (selectedGroupId !== undefined) {
+    const group = (graph.groups ?? []).find((row) => row.id === selectedGroupId)
+    const members = graph.nodes.filter((node) => node.groupId === selectedGroupId)
+    if (group !== undefined) {
+      return h(
+        'div',
+        { className: 'wfs-column wfs-column-right' },
+        h(
+          'div',
+          { className: 'wfs-section' },
+          h('div', { className: 'wfs-section-title' }, t('group.title')),
+          h(Field, {
+            label: t('group.label'),
+            children: h('input', {
+              className: 'wfs-input',
+              value: group.label ?? '',
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                state.renameGroup(group.id, event.target.value),
+            }),
+          }),
+          h('div', { className: 'wfs-hint' }, t('group.members', { n: members.length })),
+          h(
+            'div',
+            { className: 'wfs-row', style: { marginTop: '10px' } },
+            h('button', {
+              type: 'button',
+              className: 'wfs-button wfs-button-primary',
+              // The panel is the group's whether it is folded or not, so this is a
+              // real toggle: the action is always the opposite of the current state,
+              // never an 展开 that does nothing on an already-open round.
+              onClick: () => state.setGroupCollapsed(group.id, group.collapsed !== true),
+            }, group.collapsed === true ? t('group.expand') : t('group.collapse')),
+            h('button', {
+              type: 'button',
+              className: 'wfs-button wfs-button-danger',
+              onClick: () => state.ungroup(group.id),
+            }, t('action.ungroup')),
+          ),
+          // The promise the folding design rests on: this is a view, so the
+          // compiled script cannot differ between the two states.
+          h('div', { className: 'wfs-hint', style: { marginTop: '10px' } }, t('group.viewOnly')),
+        ),
+      )
+    }
+  }
+
+  if (selection.length > 1) {
+    return h(
+      'div',
+      { className: 'wfs-column wfs-column-right' },
+      h(
+        'div',
+        { className: 'wfs-section' },
+        h('div', { className: 'wfs-section-title' }, t('props.title')),
+        h('div', { className: 'wfs-hint' }, t('status.selected', { n: selection.length })),
+        h('div', { className: 'wfs-hint' }, t('props.multiHint')),
+      ),
+    )
+  }
 
   if (selected === undefined) {
     return h(

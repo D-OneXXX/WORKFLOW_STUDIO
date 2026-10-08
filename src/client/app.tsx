@@ -45,6 +45,12 @@ function Button(props: {
   onClick(): void
   variant?: 'primary' | 'danger' | 'accent'
   disabled?: boolean
+  /**
+   * Hover text. The template buttons carry the template's own description here,
+   * because the header shows a name and nothing else — what a template actually
+   * draws on the canvas is the part that decides whether to click it.
+   */
+  hint?: string
 }): React.ReactElement {
   const classes = ['wfs-button']
   if (props.variant === 'primary') classes.push('wfs-button-primary')
@@ -57,6 +63,7 @@ function Button(props: {
       className: classes.join(' '),
       disabled: props.disabled ?? false,
       onClick: props.onClick,
+      ...(props.hint === undefined ? {} : { title: props.hint }),
     },
     props.label,
   )
@@ -64,10 +71,40 @@ function Button(props: {
 
 /** The panel body. */
 export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocument, connectors, translate }: PanelProps): React.ReactElement {
-  const state = useStudio(ctx, rpc, mountError, sampleOverride)
+  const state = useStudio(ctx, rpc, mountError, sampleOverride, connectors)
   const fileInput = React.useRef<HTMLInputElement>(null)
   const [fileError, setFileError] = React.useState<string>()
   const [exportedJson, setExportedJson] = React.useState<string>()
+
+  /**
+   * Ctrl/Cmd+C and Ctrl/Cmd+V on the canvas.
+   *
+   * While a text field has focus the keystroke belongs to the field: someone
+   * copying a prompt out of the property panel must not have their node copied
+   * instead. The paste target is the editor's own clipboard, not the system one,
+   * because a workflow node has no representation outside this app that would mean
+   * anything.
+   */
+  React.useEffect(() => {
+    const editing = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false
+      return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || editing(event.target)) return
+      const key = event.key.toLowerCase()
+      if (key === 'c' && state.selection.length > 0) {
+        event.preventDefault()
+        state.copy()
+      } else if (key === 'v' && state.canPaste) {
+        event.preventDefault()
+        state.paste()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [state])
+
   const exportDocument = () => {
     try {
       compile(state.graph)
@@ -138,7 +175,14 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
       h('div', { className: 'wfs-spacer' }),
       state.dirty ? h('span', { className: 'wfs-status wfs-status-warn' }, t('status.dirty')) : null,
       h(Button, { label: t('action.new'), onClick: state.newWorkflow }),
-      h(Button, { label: t('action.sample'), onClick: state.loadSample }),
+      // The template list. The first entry keeps the label the panel has always
+      // used; the explicit round chain follows it as its own named starting point.
+      ...state.templates.map((template, index) => h(Button, {
+        key: template.name,
+        label: index === 0 ? t('action.sample') : template.name,
+        hint: template.description,
+        onClick: () => state.loadTemplate(index),
+      })),
       h(Button, { label: t('action.compile'), onClick: state.validate }),
       h(Button, { label: t('action.save'), onClick: () => void state.save(), variant: 'primary' }),
       importDocument ? h(Button, { label: '导入 JSON', onClick: () => fileInput.current?.click(), disabled: running }) : null,
@@ -212,14 +256,43 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
           : null,
         h(Canvas, {
           graph: state.graph,
-          selectedId: state.selectedId,
+          selection: state.selection,
           statusOf,
           onSelect: state.selectNode,
+          onSelectMany: state.selectMany,
           onConnect: state.connect,
           onRemoveEdge: state.removeEdge,
           onRemoveNode: state.removeNode,
           onMoveNode: state.moveNode,
+          onToggleGroup: state.setGroupCollapsed,
         }),
+        // The canvas toolbar: actions that only make sense with something picked,
+        // so they appear on the selection rather than crowding the header.
+        state.selection.length > 0
+          ? h(
+              'div',
+              { className: 'wfs-selection-bar', key: 'selection' },
+              state.selectedGroupId !== undefined
+                ? h(Button, {
+                  label: t('action.ungroup'),
+                  onClick: () => state.ungroup(state.selectedGroupId as string),
+                })
+                : null,
+              state.selection.length >= 2
+                ? h(Button, { label: t('action.group'), onClick: state.groupSelection, variant: 'accent' })
+                : null,
+              h(Button, { label: t('action.copy'), onClick: state.copy, disabled: state.selectedGroupId !== undefined }),
+              h(Button, { label: t('action.paste'), onClick: state.paste, disabled: !state.canPaste }),
+              // A round is the selection as a whole, folded or not, so the count that
+              // describes it is its members — "已选 1 个" would name a block that has
+              // already been expanded back into nodes.
+              h('span', { className: 'wfs-selection-count' }, state.selectedGroupId === undefined
+                ? t('status.selected', { n: state.selection.length })
+                : t('group.members', {
+                  n: state.graph.nodes.filter((node) => node.groupId === state.selectedGroupId).length,
+                })),
+            )
+          : null,
       ),
       h(
         'div',

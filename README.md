@@ -46,7 +46,9 @@ save/list/open/delete, import/export version-one JSON documents, and really run
 input/code/branch/output. An LLM node runs by delegating to an **outbound
 connector** (below); with none configured it says so rather than inventing
 output. Branch, llm and code nodes can be configured by **describing them in
-plain words** (below) instead of writing the configuration. The studio also
+plain words** (below) instead of writing the configuration. Repetition is drawn as
+an **explicit round chain** (below), with multi-select copy/paste, import from the
+library and node-group folding to keep it readable. The studio also
 speaks **inbound MCP** (below), so an agent program can list and run these
 workflows as tools. Streaming status, the persisted run ledger and the `mcp`
 outbound adapter are later stages. Run logs and node colours are shown on
@@ -238,6 +240,60 @@ by a person — these cover the shapes the three kinds support:
 代码    把输入里所有的逗号换成中文逗号
 ```
 
+### Repetition is drawn, not configured
+
+A loop is not a setting here. There is no round count, no exit condition and no
+budget cap hidden in a node: a repetition is drawn on the canvas as round 1 →
+round 2 → round 3, each of them ordinary nodes you can see, edit and run apart.
+That is what keeps the compiler, the runner and the graph rules untouched by this
+feature — and it is why the two arms of a chain's branch can be *different work*
+rather than the same body evaluated twice.
+
+Four things make a drawn chain usable at three rounds deep:
+
+* **Multi-select.** Shift-drag a rectangle over the canvas, `Ctrl`/`Cmd`-click or
+  `Shift`-click to add a node, a plain click to start over. The toolbar that
+  appears on the selection offers 编组 / 复制 / 粘贴 and says how much is picked.
+* **Copy and paste.** A copy carries the nodes and the wires *between* them;
+  edges that leave the selection stay where they were. Pasted nodes get fresh
+  ids and keep their labels, plain-language descriptions and executor bindings.
+  An `input` node is dropped rather than duplicated — a graph may only have one —
+  and the status line names the entry point to connect instead of guessing a
+  wire. Repeating the paste steps the copy diagonally, so it cannot stack
+  invisibly on the original.
+* **Import from the library.** The sidebar's 导入到画布 puts a whole saved
+  workflow to the right of the current content, re-keyed the same way a paste is.
+  What comes in is indistinguishable from what you drew: editable, connectable,
+  deletable, groupable. There is no live reference back to the source, on
+  purpose — "change one node and every round changes" is the hidden behaviour an
+  explicit chain exists to avoid.
+* **Node groups.** Fold a selection into one block to keep a long chain readable.
+  A block shows the stubs its members have but accepts no new connection, since
+  which member a wire should reach is not derivable from something folded; expand
+  it first. The title defaults to the first llm or branch label, and is editable.
+  **Folding is a view**: no node and no edge leaves the graph, and the compiled
+  script is byte-identical folded or unfolded — a test asserts exactly that.
+
+A node bound to a connector this machine does not have is reported the moment the
+nodes appear, listing each label and the id it names. Nothing is substituted: the
+run fails loudly at that node rather than running a step written for one model on
+whatever else happens to be installed. 清除绑定 is offered as an explicit action,
+which leaves those nodes on the deployment default.
+
+The header's template list ships the pattern as a starting point:
+**模板：三轮改写** is 输入 → 第1轮·初稿 → 第2轮·批评改写 → 分支(质量过关吗) →
+输出 / 第3轮·润色 → 输出. Every node in it carries both its plain sentence and the
+formal configuration that sentence translates to, and **no** executor binding, so
+it runs on the machine's default connector the moment it opens — with one
+fake-CLI connector configured, all three rounds execute.
+
+One line in the original plan was wrong and is worth stating plainly: *每轮是独立
+run 记录，台账天然形成质量进化曲线* is not what happens. One chain is **one** run,
+so a round is a phase in that run's log, not a record of its own. There is no run
+ledger yet (runs are not persisted), so there is no quality curve to read off it.
+Comparing rounds today means reading the progress log, or saving each round as its
+own workflow and running them one at a time.
+
 **Local code execution:** code nodes run with the current user's privileges in
 a separate process, not a permissions sandbox. Only run trusted code. A run is
 terminated after 30 seconds — plus each `llm` node's own agent allowance, so a
@@ -274,6 +330,9 @@ composer (drag, connect, inspect); no Bisheng code is used.
   opened with `ctx.layout.selectPanel(id)`.
 * **Canvas** built on `@xyflow/react`: add nodes from the palette, drag to
   arrange, connect handles, delete nodes and edges.
+* **Selection that edits in bulk**: shift-drag marquee, `Ctrl`/`Cmd`-click or
+  `Shift`-click to add, copy and paste with fresh ids, and node groups that fold
+  a long chain into one block without changing what runs.
 * **Five node kinds** — `input`, `llm`, `code`, `branch`, `output`. A branch node
   has two source handles, `true` and `false`.
 * **Property panel** for input text, prompt, code, condition, output value, and
@@ -355,6 +414,11 @@ Rejected, with a Chinese message shown to the user:
 `{{node-id}}` interpolation supports hyphens, dots, and word characters, so
 `{{n-true}}` works. Node ids are sanitized into JavaScript identifiers, and
 reserved words (`in`, `class`, `new`, …) are handled.
+
+A branch condition judges its upstream value as **text**, the same way a prompt
+does: an agent node's `{ output, summary }` reply is measured on `output`, so
+`字数 > 500` counts the model's sentences. A code node that returns some other
+object is still stringified — hand it a string if a branch is to read it.
 
 ## Install
 

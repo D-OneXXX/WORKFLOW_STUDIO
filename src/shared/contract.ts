@@ -73,6 +73,27 @@ export interface WorkflowNode {
    * stay exactly as that engine documents them.
    */
   executor?: string
+  /**
+   * The node group this node belongs to, for folding only. See `WorkflowNodeGroup`.
+   */
+  groupId?: string
+}
+
+/**
+ * A foldable node group — a round of an explicit round chain, usually.
+ *
+ * **View state only.** Folding hides nodes in the editor; it never changes the
+ * graph the compiler sees, so a workflow compiles to the same script whether it
+ * is folded or not, and a run behaves identically. Both this list and
+ * `WorkflowNode.groupId` are optional, which is why an added round chain opens
+ * in older builds and the interchange format keeps its `version: 1`.
+ */
+export interface WorkflowNodeGroup {
+  id: string
+  /** Block title when folded. Defaults to the first llm/branch label. */
+  label?: string
+  /** Collapsed into a single block. Absent means expanded. */
+  collapsed?: boolean
 }
 
 /** One directed edge. `sourceHandle` is `true`/`false` for branch arms. */
@@ -87,6 +108,8 @@ export interface WorkflowEdge {
 export interface WorkflowGraph {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  /** Folding layout; ignored by the compiler. */
+  groups?: WorkflowNodeGroup[]
 }
 
 /** A stored workflow record. */

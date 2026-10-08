@@ -42,11 +42,25 @@ export const nodeParamsSchema = z.object({
 })
 
 /**
+ * A foldable node group — a round of an explicit round chain, usually.
+ *
+ * Purely view state: the compiler never reads it, so folding cannot change what
+ * a run does. It still has to be *declared*, because zod drops undeclared keys
+ * and the folding layout would otherwise vanish silently on every save.
+ */
+export const nodeGroupSchema = z.object({
+  id: z.string().min(1).max(80),
+  label: z.string().max(80).optional(),
+  collapsed: z.boolean().optional(),
+})
+
+/**
  * One canvas node.
  *
  * `executor` binds an `llm` node to a connector id. It is optional, so an older
  * document stays valid and the interchange format keeps its `version: 1` —
- * adding an optional field is not a schema revision.
+ * adding an optional field is not a schema revision. `groupId` follows the same
+ * rule.
  */
 export const nodeSchema = z.object({
   id: z.string().min(1),
@@ -55,6 +69,7 @@ export const nodeSchema = z.object({
   params: nodeParamsSchema.optional(),
   position: z.object({ x: z.number(), y: z.number() }).optional(),
   executor: z.string().min(1).max(80).optional(),
+  groupId: z.string().min(1).max(80).optional(),
 })
 
 /** One canvas edge. */
@@ -69,6 +84,7 @@ export const edgeSchema = z.object({
 export const graphSchema = z.object({
   nodes: z.array(nodeSchema),
   edges: z.array(edgeSchema),
+  groups: z.array(nodeGroupSchema).optional(),
 })
 
 /** A stored workflow record. */

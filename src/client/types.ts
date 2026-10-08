@@ -38,6 +38,18 @@ export interface WorkflowNode {
   position?: { x: number; y: number }
   /** `llm`: connector id that executes this node; absent means the default. */
   executor?: string
+  /** The node group this node belongs to. Folding only — never compiled. */
+  groupId?: string
+}
+
+/**
+ * A foldable node group. View state: the graph the compiler sees is unchanged by
+ * folding, so a workflow behaves identically collapsed or expanded.
+ */
+export interface WorkflowNodeGroup {
+  id: string
+  label?: string
+  collapsed?: boolean
 }
 
 export interface WorkflowEdge {
@@ -50,6 +62,7 @@ export interface WorkflowEdge {
 export interface WorkflowGraph {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
+  groups?: WorkflowNodeGroup[]
 }
 
 export interface WorkflowRecord {

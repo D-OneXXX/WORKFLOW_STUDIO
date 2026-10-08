@@ -42,6 +42,7 @@ async function buildShared() {
       'lib/shared/sample': 'src/shared/sample.ts',
       'lib/shared/wire': 'src/shared/wire.ts',
       'lib/shared/document-session': 'src/client/document-session.ts',
+      'lib/shared/graph-edit': 'src/client/graph-edit.ts',
       'lib/host/descriptors': 'src/host/descriptors.ts',
       'lib/host/schemas': 'src/host/schemas.ts',
     },

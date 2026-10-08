@@ -249,7 +249,19 @@ test('all four condition operators compile', () => {
         ],
       ),
     )
-    assert.match(result.script, /if \(String\(/)
+    // Each operator reads the unwrapped text of its own branch: the same
+    // expression a prompt gets, then the comparison this condition asked for.
+    assert.match(result.script, /if \(\(br == null \? '' :/)
+    assert.match(
+      result.script,
+      {
+        len_gt: /\.length > 10\)/,
+        len_lt: /\.length < 10\)/,
+        contains: /\.includes\("needle"\)\)/,
+        eq: /=== "needle"\)/,
+      }[type],
+      `${type} compiled to the wrong comparison`,
+    )
   }
 })
 
@@ -631,4 +643,116 @@ test('a null upstream becomes empty text rather than "null"', async () => {
     },
   })
   assert.deepEqual(seen, ['[]'])
+})
+
+/**
+ * Branch conditions over an agent's value.
+ *
+ * The mirror of the section above: a branch fed by an `llm` node receives the
+ * `{ output, summary }` contract object, and `String()` of that is
+ * `"[object Object]"`. So `字数>500` used to be false for every reply of every
+ * length — the demo's own length check never looked at the text.
+ */
+
+const branchAfterAgent = (condition) =>
+  compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: '主题' } },
+        { id: 'ask', kind: 'llm', params: { prompt: '写大纲 {{in}}' } },
+        { id: 'check', kind: 'branch', params: { condition } },
+        { id: 'yes', kind: 'output' },
+        { id: 'no', kind: 'output' },
+      ],
+      [
+        ['in', 'ask'],
+        ['ask', 'check'],
+        ['check', 'yes', 'true'],
+        ['check', 'no', 'false'],
+      ],
+    ),
+  )
+
+/** Answer as the standalone connector contract does, so the object reaches the branch. */
+const contract = (output) => () => ({ output, summary: 'one line' })
+
+test('a length branch over an agent reads the reply length, not the object', async () => {
+  const result = branchAfterAgent({ type: 'len_gt', value: '500' })
+  const long = await runScript(result.script, { respond: contract('大'.repeat(600)) })
+  assert.equal(long.value.output, 'yes', 'a 600-character reply passes a 500 threshold')
+
+  const short = await runScript(branchAfterAgent({ type: 'len_gt', value: '500' }).script, {
+    respond: contract('很短'),
+  })
+  assert.equal(short.value.output, 'no', 'and a short one does not')
+})
+
+test('contains and eq match the reply text', async () => {
+  const found = await runScript(
+    branchAfterAgent({ type: 'contains', value: '大纲' }).script,
+    { respond: contract('这是三段式大纲') },
+  )
+  assert.equal(found.value.output, 'yes')
+
+  const equal = await runScript(
+    branchAfterAgent({ type: 'eq', value: 'done' }).script,
+    { respond: contract('done') },
+  )
+  assert.equal(equal.value.output, 'yes', 'an exact match on the text is an equality')
+})
+
+test('the branch condition is the same unwrap a prompt already used', () => {
+  const result = branchAfterAgent({ type: 'len_gt', value: '500' })
+  // One shared expression shape, not a second implementation of unwrapping.
+  assert.match(
+    result.script,
+    /if \(\(check == null \? '' : typeof check === 'object' && 'output' in check \? String\(check\.output\) : String\(check\)\)\.length > 500\)/,
+  )
+})
+
+test('a code node upstream of a branch is judged on what it returned', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'abc' } },
+        { id: 'wrap', kind: 'code', params: { code: 'return String(input) + "!!"' } },
+        { id: 'check', kind: 'branch', params: { condition: { type: 'len_gt', value: '4' } } },
+        { id: 'yes', kind: 'output' },
+        { id: 'no', kind: 'output' },
+      ],
+      [
+        ['in', 'wrap'],
+        ['wrap', 'check'],
+        ['check', 'yes', 'true'],
+        ['check', 'no', 'false'],
+      ],
+    ),
+  )
+  const ran = await runScript(result.script)
+  assert.equal(ran.value.output, 'yes', '"abc!!" is five characters')
+})
+
+test('only the agent contract is unwrapped: another object still stringifies', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'abc' } },
+        { id: 'wrap', kind: 'code', params: { code: 'return { body: "x".repeat(600) }' } },
+        { id: 'check', kind: 'branch', params: { condition: { type: 'len_gt', value: '500' } } },
+        { id: 'yes', kind: 'output' },
+        { id: 'no', kind: 'output' },
+      ],
+      [
+        ['in', 'wrap'],
+        ['wrap', 'check'],
+        ['check', 'yes', 'true'],
+        ['check', 'no', 'false'],
+      ],
+    ),
+  )
+  const ran = await runScript(result.script)
+  // Pinned deliberately: the unwrap is keyed on the one field the agent contract
+  // publishes. A code node that returns its own shape is unchanged by this fix —
+  // a branch over it still needs a code node to hand on the text it wants judged.
+  assert.equal(ran.value.output, 'no')
 })

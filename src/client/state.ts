@@ -10,9 +10,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DocumentSession, mintNodeId } from './document-session.js'
 
 import { compile, CompileError } from '../shared/compiler.js'
-import { SAMPLE_DESCRIPTION, SAMPLE_NAME, sampleGraph } from '../shared/sample.js'
+import {
+  EXTRA_TEMPLATES,
+  SAMPLE_DESCRIPTION,
+  SAMPLE_NAME,
+  sampleGraph,
+} from '../shared/sample.js'
 import { failureMessage, type ClientContextLike, type WorkflowRpc } from './remote.js'
+import {
+  clearUnknownExecutors,
+  copySelection,
+  flowIdOfGroup,
+  groupIdOf,
+  mergeWorkflow,
+  paste,
+  renameGroup as renameGroupOf,
+  setCollapsed,
+  ungroup as ungroupOf,
+  unknownExecutors,
+  groupSelection,
+  type NodeClipboard,
+} from './graph-edit.js'
 import type {
+  ConnectorCatalog,
   NodeKind,
   RunResult,
   WorkflowEdge,
@@ -48,7 +68,18 @@ export interface StudioState {
   name: string
   description: string
   currentId: string | undefined
+  /**
+   * The node the property panel edits: exactly one selected node, and nothing
+   * when several are selected. Two nodes named 大纲 is allowed on the canvas; the
+   * panel editing "both at once" is not.
+   */
   selectedId: string | undefined
+  /** The selected node ids, in the order they were selected. */
+  selection: string[]
+  /** A folded block under the cursor or click, when the selection is one. */
+  selectedGroupId: string | undefined
+  /** True once something has been copied, so `粘贴` has a target. */
+  canPaste: boolean
   library: WorkflowSummary[]
   run: RunResult | undefined
   running: boolean
@@ -57,6 +88,19 @@ export interface StudioState {
   t: (key: string, params?: Record<string, unknown>) => string
   setName(value: string): void
   selectNode(id: string | undefined): void
+  /** Replace the selection outright, which is what a marquee drag does. */
+  selectMany(ids: string[]): void
+  /** Copy the current selection to the editor clipboard. */
+  copy(): void
+  /** Paste the clipboard in, with all-new ids. */
+  paste(): void
+  importWorkflow(id: string): Promise<void>
+  groupSelection(): void
+  ungroup(groupId: string): void
+  setGroupCollapsed(groupId: string, collapsed: boolean): void
+  renameGroup(groupId: string, label: string): void
+  /** Drop the bindings that name a connector this machine does not have. */
+  clearUnknownBindings(): void
   addNode(kind: NodeKind): void
   updateNode(id: string, patch: Partial<WorkflowNode>): void
   updateParams(id: string, patch: NonNullable<WorkflowNode['params']>): void
@@ -65,7 +109,12 @@ export interface StudioState {
   removeEdge(id: string): void
   moveNode(id: string, position: { x: number; y: number }): void
   newWorkflow(): void
-  loadSample(): void
+  /**
+   * The built-in starting points. The first is whatever this deployment calls its
+   * example; the explicit round-chain template and any later ones follow it.
+   */
+  templates: readonly { name: string; description: string }[]
+  loadTemplate(index: number): void
   validate(): void
   save(): Promise<void>
   open(id: string): Promise<void>
@@ -79,12 +128,17 @@ export interface StudioState {
  * @param ctx - the client context, used for the locale service.
  * @param rpc - the mounted remote facade, or undefined when the mount failed.
  * @param mountError - why the mount failed, so the panel can say so.
+ * @param sampleOverride - the standalone edition's first-run example.
+ * @param connectors - the local connector catalogue, used only to tell an import
+ *   which executor bindings this machine cannot honour. Absent means unknown,
+ *   which is reported as a warning rather than as a clean import.
  */
 export function useStudio(
   ctx: ClientContextLike,
   rpc: WorkflowRpc | undefined,
   mountError: string | undefined,
   sampleOverride?: { name: string; description: string; graph: WorkflowGraph },
+  connectors?: ConnectorCatalog,
 ): StudioState {
   const session = useRef(new DocumentSession()).current
   const saving = useRef(false)
@@ -102,12 +156,42 @@ export function useStudio(
   const [name, setName] = useState('未命名工作流')
   const [description, setDescription] = useState('')
   const [currentId, setCurrentId] = useState<string | undefined>(undefined)
-  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  /**
+   * The selection is a set, and the panel target is derived from it: exactly one
+   * selected node. Keeping one array rather than a set plus a separate "current"
+   * id is what stops the highlight and the property panel disagreeing after a
+   * marquee drag.
+   */
+  const [selection, setSelection] = useState<string[]>([])
+  const [clipboard, setClipboard] = useState<NodeClipboard>()
+  /** How many times the current clipboard has been pasted, for the offset step. */
+  const pasteCount = useRef(0)
   const [library, setLibrary] = useState<WorkflowSummary[]>([])
   const [run, setRun] = useState<RunResult | undefined>(undefined)
   const [running, setRunning] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [status, setStatus] = useState<StudioState['status']>(undefined)
+
+  /** The one node the property panel edits, or nothing when several are picked. */
+  const selectedId = selection.length === 1 ? selection[0] : undefined
+  /**
+   * A folded block counts as a selection of its own. Its id carries a prefix, so a
+   * block can never be mistaken for a node — including by a click.
+   */
+  const selectedGroupId = selection.length === 1 ? groupIdOf(selection[0] ?? '') : undefined
+
+  /**
+   * Select one node, or nothing.
+   *
+   * Additive selection is not this action's job: React Flow reports a Ctrl/Cmd-click
+   * and a marquee as `select` changes, which the canvas applies through `selectMany`.
+   */
+  const selectNode = useCallback((id: string | undefined) => {
+    setSelection(id === undefined ? [] : [id])
+  }, [])
+
+  /** Marquee drag: whatever ended up inside the rectangle is the selection. */
+  const selectMany = useCallback((ids: string[]) => setSelection(ids), [])
 
   /** One typed call, or a synthesized failure when the mount never happened. */
   const call = useCallback(
@@ -171,7 +255,7 @@ export function useStudio(
           },
         ],
       }))
-      setSelectedId(id)
+      setSelection([id])
     },
     [bind, edit, graph.nodes],
   )
@@ -204,7 +288,7 @@ export function useStudio(
         nodes: current.nodes.filter((node) => node.id !== id),
         edges: current.edges.filter((edge) => edge.source !== id && edge.target !== id),
       }))
-      setSelectedId((selected) => (selected === id ? undefined : selected))
+      setSelection((current) => current.filter((one) => one !== id))
     },
     [edit],
   )
@@ -240,29 +324,180 @@ export function useStudio(
     [edit],
   )
 
+  /** Copy the selected nodes. Nothing leaves the editor: this is an internal clipboard. */
+  const copy = useCallback(() => {
+    const nodes = selection.filter((id) => groupIdOf(id) === undefined)
+    if (nodes.length === 0) {
+      setStatus({ kind: 'warn', text: bind('status.copyEmpty') })
+      return
+    }
+    setClipboard(copySelection(graph, nodes))
+    pasteCount.current = 0
+    setStatus({ kind: 'ok', text: bind('status.copied', { n: nodes.length }) })
+  }, [bind, graph, selection])
+
+  const pasteHere = useCallback(() => {
+    if (clipboard === undefined) return
+    pasteCount.current += 1
+    const outcome = paste(graph, clipboard, pasteCount.current)
+    edit(() => outcome.graph)
+    setSelection(outcome.pasted)
+    setStatus({
+      kind: outcome.entries.length > 0 ? 'warn' : 'ok',
+      // A paste always needs one more connection: the copy never brings the host
+      // input with it, so say where to attach rather than leaving a dead group.
+      text: outcome.entries.length > 0
+        ? bind('status.pastedConnect', { n: outcome.pasted.length, where: outcome.entries[0] })
+        : bind('status.pasted', { n: outcome.pasted.length }),
+    })
+  }, [bind, clipboard, edit, graph])
+
+  /**
+   * Pull a saved workflow into the current graph as a node group.
+   *
+   * The load is read-only: nothing here changes the library entry, and the merged
+   * nodes are ordinary canvas nodes afterwards.
+   */
+  const importWorkflow = useCallback(
+    async (id: string) => {
+      const row = library.find((summary) => summary.id === id)
+      const result = await call<{ name: string; graph: WorkflowGraph } | null>('load', { id })
+      if (!result.ok) {
+        setStatus({ kind: 'error', text: `${bind('error.loadFailed')}: ${failureMessage(result.error)}` })
+        return
+      }
+      if (result.value === null) {
+        setStatus({ kind: 'warn', text: bind('error.loadFailed') })
+        return
+      }
+      const outcome = mergeWorkflow(graph, result.value.graph)
+      edit(() => outcome.graph)
+      setSelection(outcome.pasted)
+      const stale = connectors === undefined
+        ? []
+        : unknownExecutors(outcome.graph, connectors.connectors.map((one) => one.id))
+      setStatus({
+        kind: stale.length > 0 ? 'error' : 'warn',
+        text: stale.length > 0
+          ? bind('status.importMissingConnector', {
+            name: row?.name ?? result.value.name,
+            nodes: stale.map((one) => `${one.label}→${one.executor}`).join('、'),
+          })
+          : bind('status.imported', {
+            name: row?.name ?? result.value.name,
+            n: outcome.pasted.length,
+            dropped: outcome.droppedInputs,
+          }),
+      })
+    },
+    [bind, call, connectors, edit, graph, library],
+  )
+
+  /** The bindings an import found that this machine cannot honour, if any. */
+  const staleBindings = useCallback((): string[] => {
+    if (connectors === undefined) return []
+    return unknownExecutors(graph, connectors.connectors.map((one) => one.id)).map((row) => row.nodeId)
+  }, [connectors, graph])
+
+  const clearUnknownBindings = useCallback(() => {
+    if (connectors === undefined) return
+    const before = staleBindings().length
+    edit((current) => clearUnknownExecutors(current, connectors.connectors.map((one) => one.id)))
+    setStatus({
+      kind: before > 0 ? 'ok' : 'warn',
+      text: before > 0 ? bind('status.bindingsCleared', { n: before }) : bind('status.noStaleBindings'),
+    })
+  }, [bind, connectors, edit, staleBindings])
+
+  const groupNodes = useCallback(() => {
+    const ids = selection.filter((id) => groupIdOf(id) === undefined)
+    const result = groupSelection(graph, ids)
+    if (result.groupId === undefined) {
+      setStatus({ kind: 'warn', text: bind('status.groupNeedsTwo') })
+      return
+    }
+    edit(() => result.graph)
+    setSelection([flowIdOfGroup(result.groupId)])
+    setStatus({ kind: 'ok', text: bind('status.grouped', { n: ids.length }) })
+  }, [bind, edit, graph, selection])
+
+  const ungroup = useCallback(
+    (groupId: string) => {
+      edit((current) => ungroupOf(current, groupId))
+      setSelection([])
+    },
+    [edit],
+  )
+
+  const collapseGroup = useCallback(
+    (groupId: string, collapsed: boolean) => {
+      edit((current) => setCollapsed(current, groupId, collapsed))
+    },
+    [edit],
+  )
+
+  const labelGroup = useCallback(
+    (groupId: string, label: string) => {
+      edit((current) => renameGroupOf(current, groupId, label))
+    },
+    [edit],
+  )
+
   const newWorkflow = useCallback(() => {
     session.replace()
     setGraph({ nodes: [], edges: [] })
     setName('未命名工作流')
     setDescription('')
     setCurrentId(undefined)
-    setSelectedId(undefined)
+    setSelection([])
+    // A clipboard from the previous document must not be pastable into this one.
+    setClipboard(undefined)
     setRun(undefined)
     setDirty(false)
     setStatus(undefined)
   }, [])
 
-  const loadSample = useCallback(() => {
-    session.replace()
-    setGraph(sampleOverride ? structuredClone(sampleOverride.graph) : sampleGraph())
-    setName(sampleOverride?.name ?? SAMPLE_NAME)
-    setDescription(sampleOverride?.description ?? SAMPLE_DESCRIPTION)
-    setCurrentId(undefined)
-    setSelectedId(undefined)
-    setRun(undefined)
-    setDirty(true)
-    setStatus(undefined)
-  }, [sampleOverride])
+  /**
+   * The template list: this deployment's example first, then the shared ones.
+   *
+   * The standalone edition opens with a workflow that runs with no model at all,
+   * so it stays the head of the list rather than being replaced by the shipped
+   * templates.
+   */
+  const templates = useMemo(
+    () => [
+      {
+        name: sampleOverride?.name ?? SAMPLE_NAME,
+        description: sampleOverride?.description ?? SAMPLE_DESCRIPTION,
+      },
+      ...EXTRA_TEMPLATES.map(({ name, description }) => ({ name, description })),
+    ],
+    [sampleOverride],
+  )
+
+  const loadTemplate = useCallback(
+    (index: number) => {
+      const template = index === 0
+        ? {
+          name: sampleOverride?.name ?? SAMPLE_NAME,
+          description: sampleOverride?.description ?? SAMPLE_DESCRIPTION,
+          graph: sampleOverride ? structuredClone(sampleOverride.graph) : sampleGraph(),
+        }
+        : EXTRA_TEMPLATES[index - 1]
+      if (template === undefined) return
+      session.replace()
+      setGraph(structuredClone(template.graph))
+      setName(template.name)
+      setDescription(template.description)
+      setCurrentId(undefined)
+      setSelection([])
+      setClipboard(undefined)
+      setRun(undefined)
+      setDirty(true)
+      setStatus({ kind: 'ok', text: bind('status.templateLoaded', { name: template.name }) })
+    },
+    [bind, sampleOverride, session],
+  )
 
   const validate = useCallback(() => {
     try {
@@ -326,7 +561,8 @@ export function useStudio(
       setName(result.value.name)
       setDescription(result.value.description ?? '')
       setCurrentId(result.value.id)
-      setSelectedId(undefined)
+      setSelection([])
+      setClipboard(undefined)
       setRun(undefined)
       setDirty(false)
       setStatus(undefined)
@@ -388,6 +624,9 @@ export function useStudio(
     description,
     currentId,
     selectedId,
+    selection,
+    selectedGroupId,
+    canPaste: clipboard !== undefined,
     library,
     run,
     running,
@@ -395,7 +634,16 @@ export function useStudio(
     dirty,
     t: bind,
     setName: value => { session.edit(); setName(value); setDirty(true); setStatus(undefined) },
-    selectNode: setSelectedId,
+    selectNode,
+    selectMany,
+    copy,
+    paste: pasteHere,
+    importWorkflow,
+    groupSelection: groupNodes,
+    ungroup,
+    setGroupCollapsed: collapseGroup,
+    renameGroup: labelGroup,
+    clearUnknownBindings,
     addNode,
     updateNode,
     updateParams,
@@ -404,7 +652,8 @@ export function useStudio(
     removeEdge,
     moveNode,
     newWorkflow,
-    loadSample,
+    templates,
+    loadTemplate,
     validate,
     save,
     open,

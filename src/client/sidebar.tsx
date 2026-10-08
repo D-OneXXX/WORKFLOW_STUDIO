@@ -38,6 +38,10 @@ function PaletteItem(props: {
 /** The palette plus the library list. */
 export function StudioSidebar({ state }: SidebarProps): React.ReactElement {
   const { t, addNode, library, open, remove, currentId } = state
+  const [picked, setPicked] = React.useState('')
+  // Importing the workflow you are already editing would only duplicate its own
+  // nodes, so the current document is not offered.
+  const importable = library.filter((row) => row.id !== currentId)
 
   return h(
     'div',
@@ -61,6 +65,37 @@ export function StudioSidebar({ state }: SidebarProps): React.ReactElement {
       'div',
       { className: 'wfs-section' },
       h('div', { className: 'wfs-section-title' }, t('library.title')),
+      // The carrier for "the next round can be different": another workflow comes
+      // in as ordinary nodes on this canvas, with new ids and no live reference.
+      importable.length > 0
+        ? h(
+            'div',
+            { className: 'wfs-row', style: { marginBottom: '8px' } },
+            h(
+              'select',
+              {
+                className: 'wfs-select',
+                'aria-label': t('action.importFromLibrary'),
+                value: picked,
+                onChange: (event: React.ChangeEvent<HTMLSelectElement>) => setPicked(event.target.value),
+              },
+              h('option', { value: '' }, t('library.pick')),
+              ...importable.map((row) =>
+                h('option', { key: row.id, value: row.id }, `${row.name} · ${row.nodeCount}`),
+              ),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'wfs-button',
+                disabled: picked.length === 0,
+                onClick: () => { void state.importWorkflow(picked) },
+              },
+              t('action.importFromLibrary'),
+            ),
+          )
+        : null,
       library.length === 0
         ? h('div', { className: 'wfs-empty' }, t('library.empty'))
         : h(

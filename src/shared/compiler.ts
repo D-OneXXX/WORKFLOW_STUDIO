@@ -284,6 +284,22 @@ interface Slot {
 }
 
 /**
+ * Render an upstream value as text.
+ *
+ * An agent node hands on the `{ output, summary }` contract, so anything that
+ * names one — a prompt or a branch condition — should receive its `output`, not
+ * `[object Object]`. Code nodes are unaffected: they receive the raw value as
+ * `input` and can read `.output` themselves.
+ *
+ * Module-level because both users of it live in different scopes: the prompt
+ * interpolator below and `conditionExpression` at the bottom of this file.
+ */
+function textOf(name: string): string {
+  return `(${name} == null ? '' : typeof ${name} === 'object' && 'output' in ${name}` +
+    ` ? String(${name}.output) : String(${name}))`
+}
+
+/**
  * Validate a graph and compile it to a workflow script.
  * @param graph - the canvas document.
  * @returns the script body plus execution metadata.
@@ -323,18 +339,6 @@ export function compile(graph: WorkflowGraph): CompileResult {
   /** Replace `{{id}}` with the matching variable reference. */
   const interpolate = (template: string): string =>
     template.replace(INTERPOLATION, (_match, id: string) => nameOf(id))
-
-  /**
-   * Render an upstream value as prompt text.
-   *
-   * An agent node hands on the `{ output, summary }` contract, so a prompt that
-   * names one should receive its `output`, not `[object Object]`. Code nodes are
-   * unaffected: they receive the raw value as `input` and can read `.output`
-   * themselves.
-   */
-  const textOf = (name: string): string =>
-    `(${name} == null ? '' : typeof ${name} === 'object' && 'output' in ${name}` +
-    ` ? String(${name}.output) : String(${name}))`
 
   /**
    * Compile a template into a JavaScript *expression*.
@@ -636,7 +640,15 @@ function conditionExpression(node: WorkflowNode, nameOf: (id: string) => string)
   if (!(type in CONDITION_LABEL)) {
     throw new CompileError(`${describe(node)} 的条件类型无效：${String(type)}`)
   }
-  const source = `String(${nameOf(node.id)} ?? '')`
+  /**
+   * The text the condition sees: the same unwrapping a prompt gets.
+   *
+   * A branch fed by an agent node holds the `{ output, summary }` object, and
+   * `String()` of that is `"[object Object]"` — 15 characters, so `字数>500` was
+   * false however long the model's reply was. `contains` and `eq` compared against
+   * the same useless string. This is the branch-side half of the v0.4.1 fix.
+   */
+  const source = textOf(nameOf(node.id))
   const raw = condition.value ?? ''
   switch (type) {
     case 'len_gt':
