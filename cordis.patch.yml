@@ -1,0 +1,35 @@
+# Bundle patch for dsh-workflow-studio.
+#
+# The engine mount is two entries, and both details matter:
+#
+#   1. An id-targeted override that disables the `workflow-ptc` row the profile
+#      already declares. The override must carry `name` — the documented dialect
+#      requires it, and without it the entry is silently ignored.
+#   2. An `insert` that adds the engine at the composition root.
+#
+# Disabling first is required: patch entries apply in order, and inserting a
+# second engine while the existing row is still enabled registers
+# `workflowEngine` twice, which Cordis rejects with
+# `service "workflowEngine" has been registered at <PtcWorkflowEngine>`.
+#
+# Why mount at the root at all: `@deepseek-ai/dsh-workflow-ptc` is a service, not
+# a bundle (it declares no `dsh.bundle` field, so a profile's
+# `dsh.profile.bundles` could never mount it), and profiles otherwise expose it
+# only inside isolated agent-preset groups. A root-level consumer cannot resolve
+# `ctx.workflowEngine` until a root row exists.
+
+- id: workflow-ptc
+  name: '@deepseek-ai/dsh-workflow-ptc'
+  disabled: true
+  config:
+    provider: spawn
+
+- insert:
+    - id: workflow-ptc-root
+      name: '@deepseek-ai/dsh-workflow-ptc'
+      config:
+        provider: spawn
+
+- insert:
+    - id: workflow-studio
+      name: dsh-workflow-studio

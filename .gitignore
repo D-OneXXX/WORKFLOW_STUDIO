@@ -1,0 +1,19 @@
+# Dependencies and the workspace-local npm cache. `.npmrc` pins
+# `cache=.npm-cache` so installs stay inside this directory.
+node_modules/
+.npm-cache/
+
+# Build output — regenerate, never commit.
+#   npm run build             -> lib/            (Harness plugin halves)
+#   npm run standalone:build  -> standalone/dist (browser bundle)
+lib/
+standalone/dist/
+
+# Local runtime state: the standalone edition's own workflow store.
+standalone/data/
+
+# Logs and OS/editor droppings.
+*.log
+.DS_Store
+Thumbs.db
+Desktop.ini

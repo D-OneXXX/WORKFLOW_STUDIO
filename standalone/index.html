@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>工作流独立版</title>
+<style>
+:root { color-scheme: dark; --dsw-alias-bg-base:#121721; --dsw-alias-bg-layer-1:#1a2230; --dsw-alias-bg-layer-2:#222e40; --dsw-alias-label-primary:#e5edf8; --dsw-alias-label-secondary:#9dacc3; --dsw-alias-border-l1:#334054; --dsw-alias-border-l2:#455269; --dsw-alias-brand-primary:#6e9fff; --dsw-alias-state-success-primary:#73d3aa; --dsw-alias-state-warn-primary:#f0c675; --dsw-alias-state-error-primary:#ff9090; }
+* { box-sizing:border-box; } body { margin:0; background:#121721; color:#e5edf8; font:14px "Segoe UI","Microsoft YaHei",sans-serif; }
+#root { height:100vh; display:flex; flex-direction:column; } .standalone-banner { padding:10px 16px; background:#202c40; border-bottom:1px solid #334054; font-size:12px; }
+.wfs-root { flex:1; } button,input,textarea,select { font:inherit; }
+.wfs-root .react-flow__minimap { background:#1a2230; width:120px; height:72px; }
+.wfs-root .react-flow__minimap-mask { fill:#12172199; }
+.wfs-root .react-flow__minimap-node { fill:#6e9fff; }
+.wfs-root .react-flow__controls-button { background:#222e40; color:#e5edf8; border-color:#334054; }
+@media (max-width: 900px) {
+  .wfs-root .react-flow__minimap { display:none; }
+  .wfs-root .wfs-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(200px,1fr) minmax(120px,1fr); }
+  .wfs-root .wfs-canvas { grid-column:1 / -1; grid-row:1; }
+  .wfs-root .wfs-column-left { grid-column:1; grid-row:2; width:auto; min-width:0; overflow:auto; }
+  .wfs-root .wfs-column-right { grid-column:2; grid-row:2; width:auto; min-width:0; overflow:auto; }
+}
+</style></head>
+<body><div id="root"></div><script defer src="/app.js"></script></body></html>
