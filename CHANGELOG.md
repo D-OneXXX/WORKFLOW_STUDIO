@@ -7,6 +7,70 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.5.0 — 2026-10-08
+
+Phase B of the manager-mode plan: the studio now talks to agents in **both**
+directions. It can delegate a step out, and an agent can start a workflow as a
+tool.
+
+### Inbound MCP server
+
+`standalone/mcp.mjs` — an MCP server (protocol `2025-06-18`) over stdio, started
+with `npm run standalone:mcp` or registered in any MCP client. It reads the same
+data directory as the browser, so the library an agent sees is the library the
+user edits.
+
+* Three tools: `workflow.list`, `workflow.run` (by `id`, or an inline `graph`,
+  with `input` overriding the input node's text and `wait: false` returning a
+  `runId` immediately), and `workflow.status`.
+* A workflow that cannot be found, or a run that ends in error, is a **tool
+  result with `isError`** — a message an agent can read and act on. Only genuine
+  protocol misuse gets a JSON-RPC error code (`-32601`, `-32602`, `-32700`).
+* **The delegation cap is closed from this side.** Phase A stamped
+  `WORKFLOW_STUDIO_DEPTH` into an agent's environment without anything reading
+  it. This server reads it and refuses `workflow.run` once three generations are
+  reached, so `llm → agent → workflow.run → llm → …` cannot recurse;
+  `workflow.list` still answers, so an over-deep agent can inspect rather than
+  being cut off completely.
+* stdout carries one JSON-RPC frame per line and nothing else — every
+  diagnostic goes to stderr, because `JSON.stringify` escapes newlines inside
+  string values and a workflow name must not be able to split a frame.
+* The library is re-read per request rather than snapshotted at startup. An MCP
+  session outlives browser edits, and a snapshot would hide a workflow saved
+  minutes ago or keep offering one already deleted.
+* Run statuses live in memory, capped at the last 200 finished runs, and record
+  the engine run id behind the MCP-facing one. The persisted ledger, streaming
+  progress and the comparison view are the next stage.
+* The handshake version is read from `package.json`, so a release bump cannot
+  leave an agent being told a version that was never shipped.
+
+### The `http` connector adapter
+
+An `llm` node can now delegate to an HTTP endpoint as well as a CLI.
+
+* One chat-completion message to `url` with `model` and fixed `headers`; the
+  reply is read from `choices[0].message.content`, and a bare
+  `{ output, summary }` or plain text is accepted too.
+* **The key is never in the file.** `apiKeyEnv` names an environment variable in
+  the server process; a missing variable is reported by name before any request
+  is made. `connectors.json` sits on disk next to workflows and must stay
+  copyable.
+* A non-2xx response reports only `返回 HTTP <status>`. The body is not
+  surfaced, because an error payload can echo a credential back — a test proves
+  a deliberately leaked key never reaches the caller.
+* The callee is stamped one generation deeper via `x-workflow-depth`, and each
+  request runs under its own `AbortController` budget.
+* The `mcp` kind is still recognised-and-pending; calling *out* to another MCP
+  server is not part of this release.
+
+### Verification
+
+87 tests, all passing. `tests/mcp.test.mjs` (13) spawns the server as a real
+child process and drives its actual stdio, because the framing is part of what
+is being tested; `tests/http-connector.test.mjs` (8) runs against a local stub
+endpoint. No paid model calls were used: connectors are exercised by fake CLI
+fixtures and a stub server.
+
 ## v0.4.1 — 2026-10-08
 
 Fixed `{{node-id}}` interpolation in an `llm` prompt. It never worked.
@@ -133,7 +197,7 @@ commit is therefore tagged `v0.2.0`, and this entry preserves the chronology.
 
 | Number | Where | Meaning | Consequence of bumping |
 |---|---|---|---|
-| `0.3.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Not read at runtime anywhere. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep. |
+| `0.5.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
 | `"version": 1` | Exported documents: `{ "format": "dsh-workflow-studio", "version": 1 }` | **Document schema revision.** Validated by `z.literal(1)` in `standalone/store.mjs`, reached from `/api/import` and `/api/export`. | Rejects every existing export, including `standalone/examples/local-workflow.json`. `tests/standalone.test.mjs` pins `version: 2` as rejected, so a bump fails that test by design. Requires a migration. |
 | `version: 1` | Storage domain in `src/host/service.ts` | **Plugin storage compatibility** for the `dsh_workflow` domain. | Bumping without populating `compatibleVersions` makes already-stored records unreadable. |
 
@@ -159,6 +223,15 @@ whether the field should template the value, replace it, or leave the panel.
 
 (The other entry here — `{{node-id}}` not interpolating in an `llm` prompt — was
 fixed in v0.4.1.)
+
+### Deferred to the next stage
+
+Not gaps in the design, but the parts of the plan the release ordering puts
+after inbound MCP: streamed run progress and node colours during a run (the
+in-memory run registry answers polling today), the persisted run ledger and
+comparison view, calling *out* to another MCP server (`kind: "mcp"` is
+recognised and reported as pending), and the REST `/api/v1/*` surface with its
+OpenAPI description.
 
 ## Tagging policy
 

@@ -111,17 +111,25 @@ test('delegation deeper than the cap is refused before anything spawns', async (
   )
 })
 
-test('http and mcp kinds are recognised but belong to phase B', async () => {
+test('an mcp connector is recognised but not yet implemented', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wfs-kinds-'))
   await writeFile(join(dir, 'connectors.json'), JSON.stringify({ connectors: [
-    { id: 'cloud', kind: 'http', url: 'https://api.example.test/chat', model: 'm' },
     { id: 'harness', kind: 'mcp', command: 'harness-mcp-bridge' },
   ] }))
   const registry = await ConnectorRegistry.load(dir)
-  assert.deepEqual(registry.listPublic().connectors.map(c => c.kind), ['http', 'mcp'])
-  for (const id of ['cloud', 'harness']) {
-    await assert.rejects(() => registry.callAgent({ prompt: 'x', executor: id }), /阶段 B/)
-  }
+  // The kind is known to the schema, so it survives loading and only fails when
+  // actually invoked — with a message that says which stage owns it.
+  assert.deepEqual(registry.listPublic().connectors, [{ id: 'harness', kind: 'mcp', label: 'harness' }])
+  await assert.rejects(
+    () => registry.callAgent({ prompt: 'x', executor: 'harness' }),
+    /mcp 适配器尚未实现/,
+  )
+})
+
+test('a connector is rejected when a required field for its kind is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'wfs-kinds2-'))
+  await writeFile(join(dir, 'connectors.json'), JSON.stringify({ connectors: [{ id: 'bad', kind: 'http' }] }))
+  await assert.rejects(() => ConnectorRegistry.load(dir), /http 连接器 bad 缺少 url/)
 })
 
 test('an unconfigured deployment still says so rather than simulating output', async () => {

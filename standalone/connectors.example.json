@@ -25,7 +25,15 @@
       "label": "DeepSeek 云端",
       "url": "https://api.deepseek.com/chat/completions",
       "model": "deepseek-chat",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
       "timeoutMs": 120000
+    },
+    {
+      "id": "local-llama",
+      "kind": "http",
+      "label": "本机推理服务",
+      "url": "http://127.0.0.1:8080/v1/chat/completions",
+      "model": "llama-3"
     },
     {
       "id": "harness",

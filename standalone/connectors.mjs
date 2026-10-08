@@ -49,6 +49,14 @@ const connectorSchema = z.object({
   env: z.record(z.string(), z.string().max(2_000)).optional(),
   url: z.string().max(500).optional(),
   model: z.string().max(200).optional(),
+  /**
+   * `http`: the *name* of an environment variable in the server process that
+   * holds the key. Naming a variable instead of storing a token keeps the
+   * secret out of `connectors.json`, which sits on disk next to workflows.
+   */
+  apiKeyEnv: z.string().max(200).optional(),
+  /** `http`: extra static request headers. */
+  headers: z.record(z.string(), z.string().max(500)).optional(),
 })
 
 const registryFileSchema = z.object({
@@ -205,13 +213,14 @@ export class ConnectorRegistry {
     if (connector === undefined) {
       throw new ConnectorError(`找不到执行器连接器 "${id}"`)
     }
-    if (connector.kind === 'http' || connector.kind === 'mcp') {
+    if (connector.kind === 'mcp') {
       throw new ConnectorError(
-        `连接器 ${id} 的 ${connector.kind} 适配器属于阶段 B，当前只实现了 cli`,
+        `连接器 ${id} 的 mcp 适配器尚未实现：Harness agent 接入属于后续阶段`,
       )
     }
     const started = Date.now()
-    const result = await runCli(connector, String(prompt ?? ''), depth + 1)
+    const invoke = connector.kind === 'http' ? runHttp : runCli
+    const result = await invoke(connector, String(prompt ?? ''), depth + 1)
     return { ...result, connectorId: id, ms: Date.now() - started }
   }
 }
@@ -327,4 +336,75 @@ function runCli(connector, prompt, depth) {
       child.stdin.end(prompt)
     }
   })
+}
+
+/**
+ * Call a cloud agent over HTTP, using the OpenAI-compatible chat shape.
+ *
+ * The key is read from a named variable in *this* process, so it never has to be
+ * written into `connectors.json`. Failures carry a status code only — a response
+ * body can echo credentials back, and this message reaches the run log.
+ */
+async function runHttp(connector, prompt, depth) {
+  const key = connector.apiKeyEnv === undefined ? undefined : process.env[connector.apiKeyEnv]
+  if (connector.apiKeyEnv !== undefined && (key === undefined || key.length === 0)) {
+    throw new ConnectorError(`${connector.id} 需要环境变量 ${connector.apiKeyEnv}，当前未设置`)
+  }
+  const limit = connector.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS
+  const headers = {
+    'content-type': 'application/json',
+    // Lets a peer service apply the same delegation cap this process enforces.
+    'x-workflow-depth': String(depth),
+    ...(connector.headers ?? {}),
+  }
+  if (key !== undefined) headers.authorization = `Bearer ${key}`
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), limit)
+  let response
+  let raw
+  try {
+    response = await fetch(connector.url, {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        ...(connector.model === undefined ? {} : { model: connector.model }),
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    raw = (await response.text()).slice(0, MAX_OUTPUT_BYTES)
+  } catch (error) {
+    throw new ConnectorError(
+      `${connector.id} 请求失败：${error?.name === 'AbortError' ? `超过 ${seconds(limit)}` : redact(error?.message ?? error)}`,
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+  if (response.ok !== true) throw new ConnectorError(`${connector.id} 返回 HTTP ${response.status}`)
+  return httpContract(connector, raw)
+}
+
+/**
+ * Read the assistant text out of a chat response.
+ * Accepts a chat-completion body, a bare `{ output, summary }` contract, or
+ * plain text; anything empty is a failed node rather than an empty success.
+ */
+function httpContract(connector, raw) {
+  let payload
+  try {
+    payload = JSON.parse(raw)
+  } catch {
+    const text = String(raw).trim()
+    if (text.length === 0) throw new ConnectorError(`${connector.id} 没有产生任何输出`)
+    return { output: text, summary: text.split(/\r?\n/)[0].slice(0, 200) }
+  }
+  const content = payload?.choices?.[0]?.message?.content
+  if (typeof content === 'string' && content.trim().length > 0) {
+    const text = content.trim()
+    return { output: text, summary: text.split(/\r?\n/)[0].slice(0, 200) }
+  }
+  const parsed = agentResultSchema.safeParse(payload)
+  if (parsed.success) return { output: parsed.data.output, summary: parsed.data.summary }
+  throw new ConnectorError(`${connector.id} 的响应里没有可用的文本内容`)
 }

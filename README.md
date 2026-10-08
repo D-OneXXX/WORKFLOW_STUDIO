@@ -24,13 +24,14 @@ Workflows are saved in `standalone/data/workflows.json`. Set
 `WORKFLOW_STUDIO_PORT` to choose another port. The server listens only on
 127.0.0.1 and rejects foreign origins and requests without its application header.
 
-**Stage-one capabilities:** edit input/code/branch/output/LLM nodes, validate,
+**Stage capabilities:** edit input/code/branch/output/LLM nodes, validate,
 save/list/open/delete, import/export version-one JSON documents, and really run
 input/code/branch/output. An LLM node runs by delegating to an **outbound
 connector** (below); with none configured it says so rather than inventing
-output. Inbound MCP, the `http`/`mcp` adapters, streaming and the run ledger are
-later stages. Run logs and node colours are shown on completion; this stage does
-not stream them.
+output. The studio also speaks **inbound MCP** (below), so an agent program can
+list and run these workflows as tools. Streaming status, the persisted run
+ledger and the `mcp` outbound adapter are later stages. Run logs and node
+colours are shown on completion; this stage does not stream them.
 
 ### Outbound connectors: the workflow is the manager
 
@@ -59,16 +60,24 @@ endpoints and environment values. Only `id`, `kind` and `label` are ever sent to
 the browser.
 
 * Three generic kinds — `cli`, `http`, `mcp` — so a newly installed agent
-  program is a config edit, not a code change. Phase A implements `cli`; the
-  other two are recognised and reported as pending.
+  program is a config edit, not a code change. `cli` and `http` are implemented;
+  `mcp` (this studio calling *out* to another MCP server) is recognised and
+  reported as pending.
 * `command` is split without a shell (`shell: false`), so the prompt is always
   data, never syntax. Quote the program part if its path contains spaces.
 * The prompt reaches the agent on stdin by default, or as one argument with
   `"promptVia": "arg"`. Check your CLI's convention; `codex` and `zcode` differ.
+* An `http` connector POSTs one chat-completion message to its `url`, using
+  `model` and any fixed `headers`. **The key is never stored in the file**:
+  `apiKeyEnv` names an environment variable in the server process, and a missing
+  variable is reported by name before any request is made. A non-2xx response
+  says only `返回 HTTP <status>` — the body is not surfaced, because an error
+  payload can echo a credential back.
 * An agent must return `{ "output": …, "summary": … }`. With
   `"outputFormat": "text"` stdout is wrapped into that shape (the first line
-  becomes the summary); with `"json"` the CLI must produce it. A response that
-  cannot satisfy the contract fails the node instead of passing text along.
+  becomes the summary); with `"json"` the CLI must produce it. A chat completion
+  is read from `choices[0].message.content`. A response that cannot satisfy the
+  contract fails the node instead of passing text along.
 * Pick the executor for a node in the property panel, next to the prompt. A node
   with no choice uses `defaultConnector`. The binding is stored on the node as
   `executor`, so it travels with save, export and import — and because it is an
@@ -83,9 +92,63 @@ log — only the connector id, duration and status are recorded. Agent nodes get
 five-minute budget by default, their own concurrency slot, and a delegation-depth
 cap of three so an agent that calls back into a workflow cannot recurse.
 
+### Inbound MCP: an agent can run your workflows
+
+The other direction. `standalone/mcp.mjs` is an MCP server over stdio, so an
+agent program (Harness, Codex, any MCP client) can see the saved library and
+drive a run as a tool — the studio becomes one step inside a larger agent task,
+without the browser being open.
+
+Register it with the client's usual MCP config, pointing at the same data
+directory the browser uses (`npm run standalone:mcp` is the same command, for
+testing it by hand):
+
+```json
+{
+  "mcpServers": {
+    "workflow-studio": {
+      "command": "node",
+      "args": ["<repo>/standalone/mcp.mjs"],
+      "env": { "WORKFLOW_STUDIO_DATA_DIR": "<repo>/standalone/data" }
+    }
+  }
+}
+```
+
+Protocol version `2025-06-18`, three tools:
+
+| Tool | What an agent gets |
+|---|---|
+| `workflow.list` | id, name, description, node count, `updatedAt`, newest first |
+| `workflow.run` | run a saved workflow by `id` (or an inline `graph`), optionally overriding the input node's text with `input`; `wait: false` returns a `runId` at once |
+| `workflow.status` | that run's state — `running` / `completed` / `error` / `cancelled` — plus its result and the engine run id behind it |
+
+`workflow.run` re-reads `workflows.json` on each request, so a workflow saved in
+the browser a moment ago is immediately available to the agent.
+
+A workflow that a *node* starts by calling back into MCP is one generation
+deeper: the parent stamps `WORKFLOW_STUDIO_DEPTH` into the agent's environment,
+this server reads it, and `workflow.run` is refused once the cap of three is
+reached — while `workflow.list` keeps working, so an over-deep agent can still
+inspect instead of being cut off entirely. That closes the loop the outbound
+side opened: without the check, `llm → agent → workflow.run → llm → …` recurses.
+
+Everything else the protocol needs is answered plainly: `initialize`, `ping`,
+`tools/list`. A notification gets no reply, stdout carries one JSON-RPC frame
+per line and nothing else, and all diagnostics go to stderr. A workflow that
+cannot be found or a run that fails is a **tool result with `isError`**, not a
+protocol error, so the agent can read the reason and react; only genuine
+protocol misuse (`-32601`, `-32602`, `-32700`) is a JSON-RPC error.
+
+Run statuses live in memory for the life of the session, capped at the last 200
+finished runs. A persisted run ledger, streamed progress, and a comparison view
+are the next stage.
+
 **Local code execution:** code nodes run with the current user's privileges in
 a separate process, not a permissions sandbox. Only run trusted code. A run is
-terminated after 30 seconds; at most two runs execute concurrently. Provider and
+terminated after 30 seconds — plus each `llm` node's own agent allowance, so a
+graph that delegates to an agent is not cut off at the base limit — and at most
+two runs execute concurrently (one, when a run uses agents). Provider and
 Harness credentials are not copied from the server's environment to the worker.
 Child processes deliberately spawned by user code are outside this timeout guarantee.
 
@@ -97,7 +160,8 @@ The HTTP/file limit is 2 MB. A runnable example is in
 `standalone/examples/local-workflow.json`. Older plugin storage and formats are
 not migrated automatically, and file interchange is not yet automatic Harness interaction.
 
-Validation: `npm run standalone:test`, `npm run typecheck`, and `npm test`.
+Validation: `npm run check` (typecheck, lint, the full suite, descriptor and
+binding verification) and `npm run standalone:test`.
 
 ## Legacy embedded plugin
 
@@ -229,22 +293,31 @@ built around.
 
 ```sh
 npm run typecheck   # tsc --noEmit
-npm run lint        # manifest, patch dialect, and domain-name checks
-npm test            # 20 compiler tests, including sandboxed branch execution
-npm run check       # all three
+npm run lint        # manifest, patch dialect, wire vocabulary, domain-name checks
+npm test            # build, then every suite in tests/
+npm run check       # typecheck + lint + test + descriptor and binding verification
 ```
 
-`npm test` executes the compiled compiler in this process and runs each compiled
-script with stubbed `agent`/`phase`/`log` hooks, so both branch arms are really
-executed rather than only inspected.
+`npm test` runs each `tests/*.test.mjs` inside one process (the DSH
+workspace-write sandbox denies the per-file child spawn `node --test` would
+need). It covers the compiler and both branch arms with stubbed
+`agent`/`phase`/`log` hooks, the document/session codec, the wire vocabulary, the
+connector registry against fake CLI programs, the `http` adapter against a local
+stub endpoint, and the MCP server spawned as a real child process and driven over
+its actual stdio.
 
 ### Sandbox note
 
 esbuild talks to a helper process over pipes. Under the DSH **workspace-write**
 sandbox that spawn is denied with `EPERM`, so `node build.mjs` needs either
-`danger-full-access` or an approved escalation. Everything else — `typecheck`,
-`lint`, and the tests — runs in-process and works inside the stricter sandbox.
-`scripts/test.mjs` imports the build rather than spawning it for the same reason.
+`danger-full-access` or an approved escalation; `scripts/test.mjs` imports the
+build rather than spawning it for the same reason. `node --test` was rejected
+for the same `EPERM` on its per-file child spawn, which is why the whole suite
+is imported into one process.
+
+Spawning a *real* program still works inside the stricter sandbox, and the suite
+relies on that: the MCP server, the fake CLI connectors and the execution worker
+are each started as child processes by their tests.
 
 ## Deviations from the task brief
 
