@@ -5,8 +5,33 @@ import { fileURLToPath } from 'node:url'
 import { WorkflowStore } from './store.mjs'
 import { runGraph, stopAllRuns } from './runner.mjs'
 import { ConnectorRegistry } from './connectors.mjs'
+import { translateDescription, translateRequestSchema } from './translator.mjs'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
+
+/**
+ * Validate a translate request, and fail with a sentence the panel can show.
+ *
+ * A zod dump would be accurate and useless here: this endpoint is called by a
+ * button click, so its errors end up in front of someone writing words, not
+ * reading stack traces. The node ids are checked against the graph because the
+ * browser may have been left open while the graph was edited elsewhere.
+ */
+function readTranslateRequest(body) {
+  const parsed = translateRequestSchema.safeParse(body)
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0]
+    throw new Error(`翻译请求不完整：${issue?.path?.join('.') ?? 'body'}——${issue?.message ?? '格式不对'}`)
+  }
+  const request = parsed.data
+  const ids = new Set(request.graph.nodes.map((node) => node.id))
+  if (!ids.has(request.nodeId)) throw new Error(`节点 ${request.nodeId} 已不在当前图上，请重新选中它`)
+  if (request.pin !== undefined && !ids.has(request.pin.nodeId)) {
+    throw new Error(`要指定的节点 ${request.pin.nodeId} 已不在当前图上`)
+  }
+  return request
+}
+
 export async function createStudioServer({ dataDir = join(root, 'data') } = {}) {
   const store = await WorkflowStore.open(dataDir)
   // Connector secrets exist only here, in the server process. The worker child
@@ -52,6 +77,18 @@ export async function createStudioServer({ dataDir = join(root, 'data') } = {}) 
           // property panel needs this to fill the executor dropdown, and it
           // stays off the Typert surface, which lint pins at exactly 5 methods.
           case '/api/connectors': value = connectors.listPublic(); break
+          // Plain-language configuration, translated at edit time only: the run
+          // path never calls this. The connector is the workflow's default, and
+          // its key stays here in the server process — the browser sends words,
+          // not a prompt it built itself, so it cannot reach the registry.
+          case '/api/translate': {
+            const request = readTranslateRequest(body)
+            value = await translateDescription({
+              ...request,
+              callAgent: ({ prompt }) => connectors.callAgent({ prompt, depth: 1 }),
+            })
+            break
+          }
           default: return reply(404, { ok: false, error: { message: '接口不存在' } })
         }
         return reply(200, { ok: true, value })

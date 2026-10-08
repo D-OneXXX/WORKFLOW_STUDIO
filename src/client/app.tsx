@@ -13,7 +13,7 @@ import { useStudio } from './state.js'
 import type { ClientContextLike, WorkflowRpc } from './remote.js'
 import type { WireResult } from './remote.js'
 import type { WorkflowGraph } from './types.js'
-import type { ConnectorCatalog } from './types.js'
+import type { ConnectorCatalog, TranslateCall } from './types.js'
 import { compile } from '../shared/compiler.js'
 
 // Both stylesheets are inlined as text by esbuild's `text` loader and injected
@@ -31,6 +31,12 @@ interface PanelProps {
   importDocument?: (document: unknown) => Promise<WireResult<{ id: string }>>
   /** Outbound connectors, when the deployment exposes them. */
   connectors?: ConnectorCatalog
+  /**
+   * Plain-language configuration, when the deployment can translate at all. The
+   * standalone edition wires it to `POST /api/translate`; the Harness plugin has
+   * no connector registry, so its panel keeps expert fields only.
+   */
+  translate?: TranslateCall
 }
 
 /** One header button. */
@@ -57,7 +63,7 @@ function Button(props: {
 }
 
 /** The panel body. */
-export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocument, connectors }: PanelProps): React.ReactElement {
+export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocument, connectors, translate }: PanelProps): React.ReactElement {
   const state = useStudio(ctx, rpc, mountError, sampleOverride)
   const fileInput = React.useRef<HTMLInputElement>(null)
   const [fileError, setFileError] = React.useState<string>()
@@ -218,7 +224,7 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
       h(
         'div',
         { className: 'wfs-column wfs-column-right' },
-        h(StudioInspector, { state, connectors }),
+        h(StudioInspector, { state, connectors, translate }),
         h(RunPanel, { state }),
       ),
     ),

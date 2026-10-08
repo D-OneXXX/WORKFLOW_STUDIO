@@ -29,6 +29,16 @@ export const nodeParamsSchema = z.object({
   code: z.string().optional(),
   condition: conditionSchema.optional(),
   outputValue: z.string().optional(),
+  /**
+   * The user's plain-language words for a branch/llm/code node. Optional, so an
+   * older document stays valid and the interchange format keeps `version: 1`.
+   */
+  description: z.string().max(2_000).optional(),
+  /**
+   * Which `description` the current formal field was translated from. The empty
+   * string means the field was edited by hand; see `contract.ts`.
+   */
+  descriptionApplied: z.string().max(2_000).optional(),
 })
 
 /**

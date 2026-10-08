@@ -7,6 +7,73 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.6.0 — 2026-10-09
+
+Plain-language node configuration: a branch, llm or code node can be set up by
+describing it in a sentence. The model is called **while configuring**, never
+during a run, so runs cost nothing extra and behave deterministically from the
+stored formal configuration.
+
+### How it works
+
+* `standalone/translator.mjs` builds the request, reads the answer, and decides
+  whether the answer may be shown at all. The server calls the workflow's default
+  connector; the browser sends words and the graph, never a prompt it assembled,
+  so keys keep staying inside the server process.
+* The property panel gains two modes for those three kinds. **大白话** describes,
+  previews and confirms; **专家** is the old form, unchanged. Nothing is written
+  until the user presses 确认使用, and the preview is editable — the common defect
+  is one number, not the whole idea.
+* The node keeps both copies: `description` (the words, so they can be translated
+  again) and the formal field, which remains the only thing the compiler reads.
+  `descriptionApplied` records which wording produced the current field, which is
+  how 配置已过期 and 已手动修改 survive closing and reopening the document.
+* `POST /api/translate`, on the standalone HTTP surface rather than Typert:
+  `scripts/lint.mjs` pins the wire vocabulary at five methods. The plugin edition
+  has no connector registry, so it keeps expert fields only.
+* Both fields are optional, so the interchange format stays at `version: 1` and
+  older documents keep loading.
+
+### What the model is not allowed to get away with
+
+The answer is re-checked against the real graph before it is ever offered:
+
+* the node list is sent marked by upstream status, and a condition or `{{id}}`
+  reference pointing at anything that is not upstream is refused — a branch has
+  no field for *which* node to test, so the reference stays a translation-time
+  detail rather than a new configuration shape;
+* a length threshold that is not a number, a code body with no `return`, and a
+  code body naming `fetch`/`process`/`require`/`fs`/`eval`/`new Function` are
+  refused with the reason;
+* an answer that is not the agreed JSON fails readably instead of half-filling
+  the node;
+* the user's sentence is embedded inside a closed marker block whose delimiters
+  are stripped from the text, so "忽略上面的要求" remains data to translate.
+
+Fallbacks keep the helper from becoming a gate: `untranslatable` carries the
+reason, ambiguity lists the candidate nodes and asks the user to pick rather than
+guessing (the choice is sent back as a settled mapping on the retry), and with no
+connector configured plain mode is greyed out while expert mode works as before.
+A failed call shows its error and leaves the typed sentence untouched.
+
+### Verification
+
+120 automated tests. `tests/translator.test.mjs` (17) covers the prompt, the
+reply shapes and every refusal above. `tests/translate-api.test.mjs` (14) drives
+the real HTTP server against a fake translator CLI, including the injection
+attempt and the origin guards, and `tests/standalone.test.mjs` pins that both
+copies survive a save, a reopen and a `version: 1` export/import while the run
+still reads only the formal field. The panel was driven in the browser for all
+three kinds: generate, edit the preview, confirm, candidate picking,
+`untranslatable`, a rejected oversized request leaving the text intact, and the
+no-connector greyed state; the saved record and its export were read back with
+both copies present.
+
+Not yet done: the human pass over the 15 typical sentences now listed in the
+README. No model quota was spent on this release — every check above ran against
+fake CLIs, and the translation quality of a real connector is unverified until
+those sentences are judged.
+
 ## v0.5.0 — 2026-10-08
 
 Phase B of the manager-mode plan: the studio now talks to agents in **both**
@@ -197,7 +264,7 @@ commit is therefore tagged `v0.2.0`, and this entry preserves the chronology.
 
 | Number | Where | Meaning | Consequence of bumping |
 |---|---|---|---|
-| `0.5.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
+| `0.6.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
 | `"version": 1` | Exported documents: `{ "format": "dsh-workflow-studio", "version": 1 }` | **Document schema revision.** Validated by `z.literal(1)` in `standalone/store.mjs`, reached from `/api/import` and `/api/export`. | Rejects every existing export, including `standalone/examples/local-workflow.json`. `tests/standalone.test.mjs` pins `version: 2` as rejected, so a bump fails that test by design. Requires a migration. |
 | `version: 1` | Storage domain in `src/host/service.ts` | **Plugin storage compatibility** for the `dsh_workflow` domain. | Bumping without populating `compatibleVersions` makes already-stored records unreadable. |
 

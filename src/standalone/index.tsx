@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { WorkflowPanel } from '../client/app.js'
 import { zh } from '../client/locales/zh.js'
 import type { ClientContextLike, WireResult, WorkflowRpc } from '../client/remote.js'
-import type { ConnectorCatalog, WorkflowGraph } from '../client/types.js'
+import type { ConnectorCatalog, TranslateOutcome, TranslateRequest, WorkflowGraph } from '../client/types.js'
 
 async function request<T>(method: string, body: unknown): Promise<WireResult<T>> {
   try {
@@ -18,6 +18,10 @@ const rpc: WorkflowRpc = {
   save: body => request('save', body), list: body => request('list', body), load: body => request('load', body),
   remove: body => request('delete', body), run: body => request('run', body),
 }
+// Plain-language configuration goes through the same local HTTP surface as the
+// five RPC methods, because the key must stay in the server process: the panel
+// sends the words and the graph, never a prompt it assembled itself.
+const translate = (body: TranslateRequest) => request<TranslateOutcome>('translate', body)
 const ctx: ClientContextLike = {
   slots: { inject: () => () => {}, register: () => undefined }, layout: { selectPanel: () => {} }, effect: () => undefined,
   locale: { register: () => () => {}, bind: () => (key, params) => {
@@ -47,7 +51,7 @@ async function main(): Promise<void> {
       <div className="standalone-banner">工作流独立版 · 本地保存与执行 · 大模型节点由已配置的连接器交给 agent 程序执行。代码节点具有本机用户权限，请仅运行自己信任的代码。</div>
       <WorkflowPanel ctx={ctx} rpc={rpc} mountError={undefined} sampleOverride={sample}
         importDocument={document => request<{ id: string }>('import', document)}
-        connectors={catalog.ok ? catalog.value : undefined} />
+        connectors={catalog.ok ? catalog.value : undefined} translate={translate} />
     </React.Fragment>,
   )
 }

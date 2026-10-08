@@ -31,6 +31,30 @@ export interface NodeParams {
   condition?: WorkflowCondition
   /** `output`: label used for the run's final value. */
   outputValue?: string
+  /**
+   * `branch`/`llm`/`code`: the user's own words for what the node does.
+   *
+   * Kept beside the formal field, never instead of it: the formal field is the
+   * only thing the compiler reads, so a run costs no tokens and behaves
+   * deterministically, while the words stay available for re-translating.
+   */
+  description?: string
+  /**
+   * The `description` whose translation produced the current formal field.
+   *
+   * This is what makes the two staleness states distinguishable after the
+   * document is closed and reopened:
+   *
+   * - equal to `description` — the formal field is the confirmed translation.
+   * - different and non-empty — the words were edited, so the configuration is
+   *   out of date and can be regenerated.
+   * - the empty string — the formal field was edited by hand in expert mode,
+   *   so the words are marked 已手动修改 and nothing further is suggested.
+   *
+   * The field is never re-derived from the formal configuration, which cannot
+   * round-trip: `500` and "超过500字" are not comparable as text.
+   */
+  descriptionApplied?: string
 }
 
 /** One node on the canvas. */
@@ -149,6 +173,48 @@ export interface WorkflowRemoteApi {
   'workflow/delete': (request: DeleteRequest) => Promise<{ deleted: boolean }>
   'workflow/run': (request: RunRequest) => Promise<RunResult>
 }
+
+/**
+ * Plain-language configuration, reached over the standalone HTTP surface
+ * (`POST /api/translate`) and **not** over Typert: `scripts/lint.mjs` pins the
+ * wire vocabulary at five methods, and an illegal name there is a fatal host
+ * load failure. The plugin edition has no connector registry, so it has no
+ * translation either.
+ */
+export interface TranslateRequest {
+  /** Only these three kinds have anything to translate. */
+  kind: 'branch' | 'llm' | 'code'
+  /** The node being configured, so the node list can exclude it. */
+  nodeId: string
+  description: string
+  /** The graph on screen, not the saved one: the node is usually unsaved. */
+  graph: WorkflowGraph
+  /**
+   * A term the user resolved by picking a candidate after an `ambiguous`
+   * answer, so the retry cannot ask the same question again.
+   */
+  pin?: { term: string; nodeId: string }
+}
+
+/** One candidate offered when a description could mean two nodes. */
+export interface TranslateCandidate {
+  id: string
+  label: string
+  kind: NodeKind
+}
+
+/**
+ * What a translation produced. Nothing here is stored: the panel shows it and
+ * the user confirms.
+ */
+export type TranslateOutcome =
+  | {
+      status: 'ok'
+      /** The formal field to write, already normalized to what the compiler reads. */
+      config: { type?: ConditionType; value?: string; prompt?: string; code?: string }
+    }
+  | { status: 'untranslatable'; reason: string }
+  | { status: 'ambiguous'; term: string; candidates: TranslateCandidate[] }
 
 /** The storage domain name; must match /^[a-z][a-z0-9_]*$/. */
 export const WORKFLOW_DOMAIN = 'dsh_workflow'

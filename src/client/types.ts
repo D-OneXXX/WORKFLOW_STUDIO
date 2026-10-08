@@ -21,6 +21,13 @@ export interface NodeParams {
   code?: string
   condition?: WorkflowCondition
   outputValue?: string
+  /** `branch`/`llm`/`code`: the user's plain-language words for this node. */
+  description?: string
+  /**
+   * The `description` the current formal field was translated from. Empty string
+   * means the field was hand-edited in expert mode. See `contract.ts`.
+   */
+  descriptionApplied?: string
 }
 
 export interface WorkflowNode {
@@ -96,3 +103,36 @@ export interface ConnectorCatalog {
   defaultId: string | null
   connectors: ConnectorOption[]
 }
+
+/** One candidate offered when a description could mean two nodes. */
+export interface TranslateCandidate {
+  id: string
+  label: string
+  kind: NodeKind
+}
+
+/** What a translation produced. Shown for confirmation; never stored directly. */
+export type TranslateOutcome =
+  | { status: 'ok'; config: { type?: ConditionType; value?: string; prompt?: string; code?: string } }
+  | { status: 'untranslatable'; reason: string }
+  | { status: 'ambiguous'; term: string; candidates: TranslateCandidate[] }
+
+/** The `POST /api/translate` call, wired only where connectors exist. */
+export interface TranslateRequest {
+  kind: 'branch' | 'llm' | 'code'
+  nodeId: string
+  description: string
+  graph: WorkflowGraph
+  pin?: { term: string; nodeId: string }
+}
+
+/**
+ * A remote call result, shaped like `WireResult` in `remote.ts`. Restated so
+ * this module stays the dependency-free type mirror the rest of the client
+ * imports.
+ */
+export type TranslateResult =
+  | { ok: true; value: TranslateOutcome }
+  | { ok: false; error: { code?: string; message?: string } }
+
+export type TranslateCall = (request: TranslateRequest) => Promise<TranslateResult>

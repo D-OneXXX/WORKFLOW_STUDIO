@@ -28,10 +28,12 @@ Workflows are saved in `standalone/data/workflows.json`. Set
 save/list/open/delete, import/export version-one JSON documents, and really run
 input/code/branch/output. An LLM node runs by delegating to an **outbound
 connector** (below); with none configured it says so rather than inventing
-output. The studio also speaks **inbound MCP** (below), so an agent program can
-list and run these workflows as tools. Streaming status, the persisted run
-ledger and the `mcp` outbound adapter are later stages. Run logs and node
-colours are shown on completion; this stage does not stream them.
+output. Branch, llm and code nodes can be configured by **describing them in
+plain words** (below) instead of writing the configuration. The studio also
+speaks **inbound MCP** (below), so an agent program can list and run these
+workflows as tools. Streaming status, the persisted run ledger and the `mcp`
+outbound adapter are later stages. Run logs and node colours are shown on
+completion; this stage does not stream them.
 
 ### Outbound connectors: the workflow is the manager
 
@@ -143,6 +145,81 @@ protocol misuse (`-32601`, `-32602`, `-32700`) is a JSON-RPC error.
 Run statuses live in memory for the life of the session, capped at the last 200
 finished runs. A persisted run ledger, streamed progress, and a comparison view
 are the next stage.
+
+### Plain-language node configuration
+
+A branch, llm or code node can be configured by describing it in one sentence
+instead of writing the configuration. This is **translate at edit time only**:
+the model is called when the button is pressed, and the formal configuration it
+proposes is what a run executes. A run calls no model to interpret your words, so
+it costs nothing extra and behaves the same every time.
+
+Every applicable node has two modes in the property panel:
+
+* **大白话** — write the sentence, press `生成配置`, read the preview, press
+  `确认使用`. Nothing is stored until you confirm, and the preview is editable
+  because the usual mistake is one number or one clause, not the whole idea.
+* **专家** — the fields as they have always been: condition type and value,
+  prompt with `{{node-id}}`, code editor. Switching back shows the formal
+  configuration either way, so translating never hides what a node actually does.
+
+The node then carries both: `description` (your words, kept so they can be
+translated again) and the formal field, which is the only thing the compiler
+reads. `descriptionApplied` remembers which wording produced the current
+configuration, so the panel can say 配置已过期 when you edit the sentence without
+regenerating, or 已手动修改 when you edit the configuration itself.
+
+The request goes to `POST /api/translate`. The browser sends the words and the
+graph; it never builds the prompt, so the connector's command line, endpoint and
+key stay in the server process, as with outbound agent steps.
+
+Two things make a translation correct, and both are enforced rather than
+requested:
+
+* **The node list travels with the request**, marked by whether each node is
+  upstream. Without it "把主题扩展成大纲" cannot be mapped to `{{n1}}` — and a
+  reference to a node that has not run yet has no value to read.
+* **The answer is re-checked against the graph.** A condition naming a node that
+  is not the branch's upstream, a prompt interpolating a non-upstream node, a
+  code body without a `return` or reaching for `fetch`/`process`/`require`/`fs`,
+  is refused with a readable reason instead of being offered for confirmation.
+
+Fallbacks, all of which keep the expert mode working:
+
+| Situation | What you see |
+|---|---|
+| Beyond the four operators ("语气是否礼貌") | `untranslatable` plus the model's reason and how to say it instead |
+| Two nodes could be meant | the candidates listed; pick one, and the retry carries your choice |
+| No connector configured | plain mode greyed out with a pointer to `connectors.json`; expert mode unaffected |
+| Call fails or times out | the error shown, your sentence left untouched |
+| You don't trust the answer | it was only ever a proposal — edit it, or write it yourself |
+
+A description is quoted inside a closed marker block whose delimiters are
+stripped from the text, so a sentence that says "忽略上面的要求" is still just
+something to translate.
+
+For the human check the spec asks for — five typical sentences per kind, judged
+by a person — these cover the shapes the three kinds support:
+
+```text
+分支    如果大纲的字数超过500
+分支    输入里包含「紧急」就走这边
+分支    清洗后的结果不足 20 个字
+分支    主题正好是「无」
+分支    大纲长度不超过 800
+
+大模型  把主题扩展成一份300字左右的中文大纲，分点列出
+大模型  用一句话说清楚输入讲的是什么
+大模型  把大纲改写成面向小白的版本
+大模型  判断输入是否需要补充资料，只回答是或否
+大模型  把主题里的地名替换成对应省份
+
+代码    把输入的每行前面加上序号
+代码    去掉输入首尾的空格和换行
+代码    把输入转成全大写
+代码    统计输入有多少个字符，返回数字的文本
+代码    把输入里所有的逗号换成中文逗号
+```
 
 **Local code execution:** code nodes run with the current user's privileges in
 a separate process, not a permissions sandbox. Only run trusted code. A run is

@@ -30,6 +30,47 @@ test('records survive reopen; export/import preserves graph with new identity', 
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
+test('plain-language fields travel with the document and stay inert at run time', async () => {
+  const described = graph()
+  described.nodes[1] = {
+    id: 'code',
+    kind: 'code',
+    label: '加序号',
+    params: {
+      code: 'return `1. ${input}`',
+      description: '给输入加上序号',
+      descriptionApplied: '给输入加上序号',
+    },
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'wfs-words-'))
+  try {
+    const store = await WorkflowStore.open(dir)
+    const saved = await store.save({ name: '大白话', graph: described })
+
+    // Both copies survive a reopen, and an export/import cycle to another
+    // machine, which is the point: the words stay translatable.
+    const reopened = await WorkflowStore.open(dir)
+    assert.deepEqual(reopened.load(saved.id).graph.nodes[1].params, described.nodes[1].params)
+    const imported = await reopened.import(reopened.export(saved.id))
+    assert.deepEqual(
+      reopened.load(imported.id).graph.nodes[1].params.description,
+      '给输入加上序号',
+      'the description must ride along with the formal configuration',
+    )
+
+    // A run reads the formal field and nothing else — translation added no
+    // behaviour to the compiled script.
+    const result = await runGraph(described)
+    assert.equal(result.stopReason, 'completed', result.error ?? '')
+    assert.equal(result.value.value, '1. hello')
+
+    // Documents written before this feature are still valid, and gain nothing.
+    const older = await store.save({ name: '旧的', graph: graph() })
+    // A second `open`, because each store instance reads the file once.
+    assert.equal((await WorkflowStore.open(dir)).load(older.id).graph.nodes[1].params.description, undefined)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
 test('invalid or future interchange documents are rejected', () => {
   assert.throws(() => parseInterchange({ format: 'dsh-workflow-studio', version: 2, workflow: { name: 'x', graph: graph() } }))
   assert.throws(() => parseInterchange({ format: 'dsh-workflow-studio', version: 1, workflow: { name: 'x', graph: { nodes: [], edges: [] } } }))
