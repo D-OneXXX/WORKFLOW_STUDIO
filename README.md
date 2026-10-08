@@ -19,6 +19,23 @@ Open `http://127.0.0.1:43180/`; load the example, save, and run. Alternatively,
 run `standalone/start.ps1` in PowerShell to build and start together. Keep that
 terminal open; Ctrl+C stops the service.
 
+To work on it instead of just using it, run the watcher on
+`http://127.0.0.1:43199`:
+
+```sh
+npm run standalone:dev
+```
+
+It rebuilds on every save. A change to the browser sources rewrites the bundle and
+**leaves the server alone** — refresh the page, and a run in flight or an agent
+call that takes minutes survives it. A change to `standalone/*.mjs`, `src/host` or
+`src/shared` replaces the process, because Node has already evaluated the old
+module graph. A touch that changes no bytes does nothing at all: Windows reports
+metadata events for files the indexer or an antivirus merely opened, and
+restarting on one of those would kill a call you are waiting for. Stop it with
+Ctrl+C, or by killing the process — the server is a child that exits when its
+supervisor's stdin closes, so it cannot outlive the watcher and squat the port.
+
 Workflows are saved in `standalone/data/workflows.json`. Set
 `WORKFLOW_STUDIO_DATA_DIR` to choose another directory and
 `WORKFLOW_STUDIO_PORT` to choose another port. The server listens only on

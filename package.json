@@ -1,6 +1,6 @@
 {
   "name": "dsh-workflow-studio",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Visual workflow studio for DeepSeek Harness: drag-and-drop DAG authoring, compile, and one-click run.",
   "type": "module",
@@ -31,6 +31,7 @@
   "scripts": {
     "standalone:build": "node standalone/build.mjs",
     "standalone:start": "node standalone/server.mjs",
+    "standalone:dev": "node standalone/dev.mjs",
     "standalone:mcp": "node standalone/mcp.mjs",
     "standalone:test": "node tests/standalone.test.mjs",
     "build": "node build.mjs",

@@ -105,15 +105,27 @@ export async function createStudioServer({ dataDir = join(root, 'data') } = {}) 
   return { server, store, connectors, close: () => new Promise(resolveClose => { stopAllRuns(); server.close(resolveClose); server.closeIdleConnections() }) }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const dataDir = process.env.WORKFLOW_STUDIO_DATA_DIR ?? join(root, 'data')
-  const port = Number(process.env.WORKFLOW_STUDIO_PORT ?? 43180)
+/**
+ * Bind the studio to 127.0.0.1 and report the address once it answers.
+ *
+ * Exported because two entry points need it: running this file directly, and
+ * `standalone/dev.mjs`, which starts the server inside a child it can replace on
+ * a rebuild. `port: 0` asks for any free port.
+ */
+export async function startStandaloneServer({
+  dataDir = join(root, 'data'),
+  port = Number(process.env.WORKFLOW_STUDIO_PORT ?? 43180),
+} = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('端口必须是 0–65535 的整数')
   const app = await createStudioServer({ dataDir })
   app.server.on('error', error => { console.error(`独立服务启动失败：${error.message}`); process.exitCode = 1 })
-  app.server.listen(port, '127.0.0.1', () => {
-    console.log(`工作流独立版：http://127.0.0.1:${app.server.address().port}`)
-    console.log(`数据目录：${resolve(dataDir)}`)
-  })
+  await new Promise((done) => app.server.listen(port, '127.0.0.1', done))
+  console.log(`工作流独立版：http://127.0.0.1:${app.server.address().port}`)
+  console.log(`数据目录：${resolve(dataDir)}`)
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void app.close() })
+  return app
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await startStandaloneServer({ dataDir: process.env.WORKFLOW_STUDIO_DATA_DIR ?? join(root, 'data') })
 }

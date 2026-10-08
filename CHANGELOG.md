@@ -7,6 +7,30 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.6.1 — 2026-10-09
+
+`npm run standalone:dev` — a watcher that keeps the standalone edition running
+while the source changes. It listens on `http://127.0.0.1:43199`, one above the
+served default, so it never collides with a plain `standalone:start`.
+
+* A browser-source change rebuilds the bundle and leaves the server process
+  standing, so a run in flight — or an agent call that takes minutes — survives
+  it. A server-source change replaces the process, because Node has already
+  evaluated the old module graph and there is no honest way to swap it in place.
+* A touch that changes no bytes is ignored. Windows fires change events for files
+  the indexer or an antivirus merely opened, and restarting on one of those would
+  interrupt a call the user is waiting on.
+* The server runs as a child that exits when its supervisor's stdin closes, so it
+  cannot outlive the watcher. This was verified the hard way: two orphaned
+  `standalone/server.mjs` processes held port 43199 during development, and
+  `npm run` makes it worse by putting a wrapper in front of the process you
+  actually meant to kill — stop `node standalone/dev.mjs` directly.
+* `standalone/build.mjs` exports `buildStandalone()` and `standalone/server.mjs`
+  exports `startStandaloneServer()`, so the watcher reuses the real build and bind
+  paths rather than duplicating them.
+
+No product behaviour changed; the suites are the ones from v0.6.0.
+
 ## v0.6.0 — 2026-10-09
 
 Plain-language node configuration: a branch, llm or code node can be set up by
@@ -264,7 +288,7 @@ commit is therefore tagged `v0.2.0`, and this entry preserves the chronology.
 
 | Number | Where | Meaning | Consequence of bumping |
 |---|---|---|---|
-| `0.6.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
+| `0.6.1` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
 | `"version": 1` | Exported documents: `{ "format": "dsh-workflow-studio", "version": 1 }` | **Document schema revision.** Validated by `z.literal(1)` in `standalone/store.mjs`, reached from `/api/import` and `/api/export`. | Rejects every existing export, including `standalone/examples/local-workflow.json`. `tests/standalone.test.mjs` pins `version: 2` as rejected, so a bump fails that test by design. Requires a migration. |
 | `version: 1` | Storage domain in `src/host/service.ts` | **Plugin storage compatibility** for the `dsh_workflow` domain. | Bumping without populating `compatibleVersions` makes already-stored records unreadable. |
 
