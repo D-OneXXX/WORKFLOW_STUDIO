@@ -1,0 +1,38 @@
+{
+  "defaultConnector": "codex-local",
+  "connectors": [
+    {
+      "id": "codex-local",
+      "kind": "cli",
+      "label": "Codex（本机）",
+      "command": "codex exec",
+      "promptVia": "arg",
+      "outputFormat": "text",
+      "timeoutMs": 300000
+    },
+    {
+      "id": "zcode-local",
+      "kind": "cli",
+      "label": "ZCode（本机）",
+      "command": "zcode run",
+      "promptVia": "stdin",
+      "outputFormat": "text",
+      "timeoutMs": 300000
+    },
+    {
+      "id": "deepseek-api",
+      "kind": "http",
+      "label": "DeepSeek 云端",
+      "url": "https://api.deepseek.com/chat/completions",
+      "model": "deepseek-chat",
+      "timeoutMs": 120000
+    },
+    {
+      "id": "harness",
+      "kind": "mcp",
+      "label": "Harness Agent",
+      "command": "harness-mcp-bridge",
+      "timeoutMs": 300000
+    }
+  ]
+}

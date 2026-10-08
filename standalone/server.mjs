@@ -4,10 +4,14 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WorkflowStore } from './store.mjs'
 import { runGraph, stopAllRuns } from './runner.mjs'
+import { ConnectorRegistry } from './connectors.mjs'
 
 const root = fileURLToPath(new URL('.', import.meta.url))
 export async function createStudioServer({ dataDir = join(root, 'data') } = {}) {
   const store = await WorkflowStore.open(dataDir)
+  // Connector secrets exist only here, in the server process. The worker child
+  // asks this registry to run an agent step and receives only a result.
+  const connectors = await ConnectorRegistry.load(dataDir)
   const server = createServer(async (request, response) => {
     const reply = (status, data) => {
       response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' })
@@ -42,8 +46,12 @@ export async function createStudioServer({ dataDir = join(root, 'data') } = {}) 
           case '/api/run': {
             const graph = body.graph ?? store.load(body.id)?.graph
             if (!graph) throw new Error('找不到要运行的工作流')
-            value = await runGraph(graph); break
+            value = await runGraph(graph, { registry: connectors }); break
           }
+          // Ids and labels only — never command lines, endpoints, or env. The
+          // property panel needs this to fill the executor dropdown, and it
+          // stays off the Typert surface, which lint pins at exactly 5 methods.
+          case '/api/connectors': value = connectors.listPublic(); break
           default: return reply(404, { ok: false, error: { message: '接口不存在' } })
         }
         return reply(200, { ok: true, value })
@@ -57,7 +65,7 @@ export async function createStudioServer({ dataDir = join(root, 'data') } = {}) 
       response.end(bytes)
     } catch (error) { reply(400, { ok: false, error: { code: 'standalone/error', message: error.message } }) }
   })
-  return { server, store, close: () => new Promise(resolveClose => { stopAllRuns(); server.close(resolveClose); server.closeIdleConnections() }) }
+  return { server, store, connectors, close: () => new Promise(resolveClose => { stopAllRuns(); server.close(resolveClose); server.closeIdleConnections() }) }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -26,9 +26,62 @@ Workflows are saved in `standalone/data/workflows.json`. Set
 
 **Stage-one capabilities:** edit input/code/branch/output/LLM nodes, validate,
 save/list/open/delete, import/export version-one JSON documents, and really run
-input/code/branch/output. LLM execution explicitly reports an unconfigured
-connector. Model calls, MCP and Harness execution adapters are later stages.
-Run logs and node colours are shown on completion; this stage does not stream them.
+input/code/branch/output. An LLM node runs by delegating to an **outbound
+connector** (below); with none configured it says so rather than inventing
+output. Inbound MCP, the `http`/`mcp` adapters, streaming and the run ledger are
+later stages. Run logs and node colours are shown on completion; this stage does
+not stream them.
+
+### Outbound connectors: the workflow is the manager
+
+An `llm` node does not call a model itself. It hands the step to an agent
+program — `codex`, `zcode`, a cloud endpoint — chosen per node. The workflow
+keeps the DAG, the state and the schedule; the agent does the work.
+
+Configure it by copying the template into the data directory and editing it:
+
+```sh
+cp standalone/connectors.example.json standalone/data/connectors.json
+```
+
+```json
+{
+  "defaultConnector": "codex-local",
+  "connectors": [
+    { "id": "codex-local", "kind": "cli", "label": "Codex（本机）",
+      "command": "codex exec", "promptVia": "arg", "timeoutMs": 300000 }
+  ]
+}
+```
+
+`connectors.json` lives in the data directory, which is gitignored — it may hold
+endpoints and environment values. Only `id`, `kind` and `label` are ever sent to
+the browser.
+
+* Three generic kinds — `cli`, `http`, `mcp` — so a newly installed agent
+  program is a config edit, not a code change. Phase A implements `cli`; the
+  other two are recognised and reported as pending.
+* `command` is split without a shell (`shell: false`), so the prompt is always
+  data, never syntax. Quote the program part if its path contains spaces.
+* The prompt reaches the agent on stdin by default, or as one argument with
+  `"promptVia": "arg"`. Check your CLI's convention; `codex` and `zcode` differ.
+* An agent must return `{ "output": …, "summary": … }`. With
+  `"outputFormat": "text"` stdout is wrapped into that shape (the first line
+  becomes the summary); with `"json"` the CLI must produce it. A response that
+  cannot satisfy the contract fails the node instead of passing text along.
+* Pick the executor for a node in the property panel, next to the prompt. A node
+  with no choice uses `defaultConnector`. The binding is stored on the node as
+  `executor`, so it travels with save, export and import — and because it is an
+  optional field, the document format stays at version 1.
+
+**Why secrets stay in the server.** The worker child runs your code nodes, so its
+environment is a fixed whitelist. When a node asks for an agent step the worker
+sends only `{ nodeId, prompt }` over IPC; the parent performs the call and
+returns the result. A connector's command line, endpoint and `env` therefore
+never enter the worker, and prompts and response bodies are kept out of the run
+log — only the connector id, duration and status are recorded. Agent nodes get a
+five-minute budget by default, their own concurrency slot, and a delegation-depth
+cap of three so an agent that calls back into a workflow cannot recurse.
 
 **Local code execution:** code nodes run with the current user's privileges in
 a separate process, not a permissions sandbox. Only run trusted code. A run is

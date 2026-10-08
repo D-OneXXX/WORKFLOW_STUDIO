@@ -13,6 +13,7 @@ import { useStudio } from './state.js'
 import type { ClientContextLike, WorkflowRpc } from './remote.js'
 import type { WireResult } from './remote.js'
 import type { WorkflowGraph } from './types.js'
+import type { ConnectorCatalog } from './types.js'
 import { compile } from '../shared/compiler.js'
 
 // Both stylesheets are inlined as text by esbuild's `text` loader and injected
@@ -28,6 +29,8 @@ interface PanelProps {
   mountError: string | undefined
   sampleOverride?: { name: string; description: string; graph: WorkflowGraph }
   importDocument?: (document: unknown) => Promise<WireResult<{ id: string }>>
+  /** Outbound connectors, when the deployment exposes them. */
+  connectors?: ConnectorCatalog
 }
 
 /** One header button. */
@@ -54,7 +57,7 @@ function Button(props: {
 }
 
 /** The panel body. */
-export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocument }: PanelProps): React.ReactElement {
+export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocument, connectors }: PanelProps): React.ReactElement {
   const state = useStudio(ctx, rpc, mountError, sampleOverride)
   const fileInput = React.useRef<HTMLInputElement>(null)
   const [fileError, setFileError] = React.useState<string>()
@@ -215,7 +218,7 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
       h(
         'div',
         { className: 'wfs-column wfs-column-right' },
-        h(StudioInspector, { state }),
+        h(StudioInspector, { state, connectors }),
         h(RunPanel, { state }),
       ),
     ),

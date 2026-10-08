@@ -29,6 +29,8 @@ export interface WorkflowNode {
   label?: string
   params?: NodeParams
   position?: { x: number; y: number }
+  /** `llm`: connector id that executes this node; absent means the default. */
+  executor?: string
 }
 
 export interface WorkflowEdge {
@@ -78,3 +80,19 @@ export interface RunResult {
 
 /** Where a node's status colour comes from while a run is in flight. */
 export type NodeStatus = 'idle' | 'active' | 'done' | 'error'
+
+/**
+ * One outbound connector, as the panel is allowed to see it.
+ * Command lines, endpoints and environment never leave the server process.
+ */
+export interface ConnectorOption {
+  id: string
+  kind: 'cli' | 'http' | 'mcp'
+  label: string
+}
+
+/** The executor catalogue backing the property panel's dropdown. */
+export interface ConnectorCatalog {
+  defaultId: string | null
+  connectors: ConnectorOption[]
+}

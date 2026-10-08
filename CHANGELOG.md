@@ -7,7 +7,48 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.4.0 — 2026-10-08
+
+Phase A of the manager-mode plan: **outbound connectors**. An `llm` node now
+delegates its step to a real agent program instead of reporting that no model
+connector exists.
+
+* `standalone/connectors.mjs` — a registry read from `connectors.json` in the
+  data directory. Three generic kinds (`cli`, `http`, `mcp`) so a new agent
+  program is a config edit, not a code change. `cli` is implemented here;
+  `http`/`mcp` are recognised and reported as phase B rather than missing.
+* The CLI adapter spawns with `shell: false` and a whitelisted environment, so a
+  prompt can never be interpreted as shell syntax and cannot inherit parent
+  credentials. Command splitting is quote-aware for paths containing spaces.
+* Result contract `{ output, summary }`, validated at the boundary. A response
+  that cannot satisfy it fails the node instead of forwarding loose text.
+* **Secrets never enter the worker.** The worker sends only
+  `{ nodeId, prompt }` over IPC and receives only a result; the parent performs
+  the call. Command line, endpoint and connector `env` stay in the server
+  process, which matters because the worker also executes untrusted code nodes.
+  Prompts and response bodies are excluded from the run log, and a failing
+  agent's stderr is redacted before it is shown.
+* Agent nodes get a five-minute default budget. The run's total budget is now
+  `30s + Σ(agent node budgets)` rather than a flat 30 seconds, and agent runs
+  hold their own concurrency slot (2 code runs, plus 1 agent run).
+* Delegation depth is capped at three and passed to agents as
+  `WORKFLOW_STUDIO_DEPTH`, the hook an inbound call (phase B) will check.
+* `node.executor` binds a node to a connector, chosen from a new dropdown in the
+  property panel. It is an optional node field, so it survives save, export and
+  import and the interchange format stays at version 1.
+* The connector list reaches the browser over `POST /api/connectors`, not the
+  Typert surface: `scripts/lint.mjs` pins the wire vocabulary at exactly five
+  methods, and an illegal name there is a fatal host load failure.
+* Fixed a latent quota leak: a run released its concurrency slot only when the
+  child reported `exit`, which is asynchronous, so two agent runs back to back
+  could be refused by a run that had already finished.
+* Tests: `tests/connectors.test.mjs` (21 cases) drives the whole outbound path
+  against `tests/fixtures/agent-fake.mjs`, including contract violation,
+  timeout kill, stderr redaction, depth cap, slot separation, and a code node
+  proving the worker cannot see connector secrets. No model quota is used.
+
 ## v0.3.0 — 2026-10-08
+
 
 Visual language merged from the `workflow-studio` v0.1 reference build.
 Presentation only: no behaviour, protocol, storage or document-format change.
@@ -73,6 +114,30 @@ commit is therefore tagged `v0.2.0`, and this entry preserves the chronology.
 The built artifacts in `lib/` and `standalone/dist/` embed the two schema
 numbers but never the release version, and they are not committed — regenerate
 with `npm run build` and `npm run standalone:build`.
+
+## Known issues
+
+### `{{node-id}}` does not interpolate in an LLM prompt
+
+Pre-existing, and untouched by v0.4.0. The compiler emits an `llm` node's prompt
+as a JSON string literal, so `{{input}}` reaches the agent as the sanitized
+**variable name** (`input_n`) rather than the upstream value:
+
+```js
+agent_n = await agent("say input_n", { phase: "agent" });   // not "say hello"
+```
+
+Code nodes are unaffected — their body is emitted as raw JavaScript, so the same
+substitution produces a real variable reference. `README.md` and the palette
+description both advertise interpolation for LLM nodes, so this is a genuine gap,
+and it weakens the outbound path added in v0.4.0: an agent receives a prompt
+containing an identifier instead of the data it was meant to work on.
+
+Tracked by a `todo` test, `an llm prompt interpolates the upstream value`, in
+`tests/connectors.test.mjs`. It reports honestly today and becomes an ordinary
+failing/passing test the moment the compiler is fixed. The fix is to build the
+prompt as a concatenation of string literals and variable references instead of
+one `JSON.stringify` of the interpolated text.
 
 ## Tagging policy
 

@@ -46,6 +46,9 @@ export const en = {
   'props.conditionValue': 'Value',
   'props.outputValue': 'Output value',
   'props.codeHint': 'The body must return; use input and {{nodeId}}',
+  'props.executor': 'Executor',
+  'props.executorDefault': 'Use the default executor',
+  'props.executorHint': 'Which agent program runs this node. With no connector configured the run still reports that none is wired up.',
   'props.deleteNode': 'Delete node',
 
   'library.title': 'Saved workflows',

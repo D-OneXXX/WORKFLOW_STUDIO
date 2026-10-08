@@ -42,6 +42,13 @@ export interface WorkflowNode {
   params?: NodeParams
   /** Canvas geometry, opaque to the compiler. */
   position?: { x: number; y: number }
+  /**
+   * `llm`: connector id that executes this node. Absent means the deployment's
+   * default connector. The compiled script never carries it — the runner keeps
+   * a node-id map beside the script, so the Harness engine's `agent()` options
+   * stay exactly as that engine documents them.
+   */
+  executor?: string
 }
 
 /** One directed edge. `sourceHandle` is `true`/`false` for branch arms. */

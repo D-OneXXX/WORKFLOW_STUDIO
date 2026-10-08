@@ -46,6 +46,9 @@ export const zh = {
   'props.conditionValue': '条件值',
   'props.outputValue': '输出值',
   'props.codeHint': '代码体需要 return；可用变量 input 与 {{节点ID}}',
+  'props.executor': '执行器',
+  'props.executorDefault': '使用默认执行器',
+  'props.executorHint': '该节点交给哪个 agent 程序执行；未配置连接器时仍会报告尚未接入',
   'props.deleteNode': '删除节点',
 
   'library.title': '已保存的工作流',

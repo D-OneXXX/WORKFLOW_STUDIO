@@ -31,13 +31,20 @@ export const nodeParamsSchema = z.object({
   outputValue: z.string().optional(),
 })
 
-/** One canvas node. */
+/**
+ * One canvas node.
+ *
+ * `executor` binds an `llm` node to a connector id. It is optional, so an older
+ * document stays valid and the interchange format keeps its `version: 1` —
+ * adding an optional field is not a schema revision.
+ */
 export const nodeSchema = z.object({
   id: z.string().min(1),
   kind: nodeKindSchema,
   label: z.string().optional(),
   params: nodeParamsSchema.optional(),
   position: z.object({ x: z.number(), y: z.number() }).optional(),
+  executor: z.string().min(1).max(80).optional(),
 })
 
 /** One canvas edge. */

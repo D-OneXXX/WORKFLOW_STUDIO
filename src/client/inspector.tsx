@@ -8,7 +8,7 @@
 import * as React from 'react'
 
 import type { StudioState } from './state.js'
-import type { ConditionType, WorkflowNode } from './types.js'
+import type { ConditionType, ConnectorCatalog, WorkflowNode } from './types.js'
 
 const h = React.createElement
 
@@ -17,6 +17,8 @@ const CONDITIONS: ConditionType[] = ['len_gt', 'len_lt', 'contains', 'eq']
 
 interface InspectorProps {
   state: StudioState
+  /** Absent until a deployment reports connectors; then the dropdown appears. */
+  connectors?: ConnectorCatalog
 }
 
 /** One labelled field row. */
@@ -33,7 +35,7 @@ function Field(props: {
 }
 
 /** The property editor. */
-export function StudioInspector({ state }: InspectorProps): React.ReactElement {
+export function StudioInspector({ state, connectors }: InspectorProps): React.ReactElement {
   const { graph, selectedId, t, updateNode, updateParams, removeNode } = state
   const node: WorkflowNode | undefined = graph.nodes.find((candidate) => candidate.id === selectedId)
 
@@ -93,6 +95,31 @@ export function StudioInspector({ state }: InspectorProps): React.ReactElement {
         }),
       }),
     )
+    // The executor binding is a node field, but it only exists once a
+    // deployment reports connectors — the Harness plugin has none yet.
+    if (connectors !== undefined && connectors.connectors.length > 0) {
+      const options = connectors.connectors.map((connector) =>
+        h('option', { key: connector.id, value: connector.id }, `${connector.label} · ${connector.kind}`),
+      )
+      fields.push(
+        h(Field, {
+          key: 'executor',
+          label: t('props.executor'),
+          children: h(
+            'select',
+            {
+              className: 'wfs-select',
+              value: node.executor ?? '',
+              onChange: (event: React.ChangeEvent<HTMLSelectElement>) =>
+                updateNode(node.id, { executor: event.target.value === '' ? undefined : event.target.value }),
+            },
+            h('option', { key: '__default', value: '' }, t('props.executorDefault')),
+            ...options,
+          ),
+        }),
+        h('div', { className: 'wfs-hint', key: 'executor-hint' }, t('props.executorHint')),
+      )
+    }
   }
 
   if (node.kind === 'code') {
