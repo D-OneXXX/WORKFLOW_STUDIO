@@ -7,6 +7,32 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.4.1 — 2026-10-08
+
+Fixed `{{node-id}}` interpolation in an `llm` prompt. It never worked.
+
+The compiler ran the whole interpolated template through `JSON.stringify`, so
+the substitution produced the sanitized **variable name** as literal text:
+
+```js
+agent_n = await agent("say input_n", { phase: "agent" });   // was meant to be "say hello"
+```
+
+Code nodes were never affected because their body is emitted as raw JavaScript,
+where the same substitution lands on a real variable reference.
+
+A prompt is now compiled to a concatenation of JSON-encoded literals and variable
+references, so an upstream value is read at run time and cannot be mistaken for
+code even when it contains quotes or braces. A prompt with no reference still
+emits a plain literal. Because an agent node returns the `{ output, summary }`
+contract, naming one in a prompt now contributes its `output` rather than
+`[object Object]`, and a null upstream contributes empty text rather than
+`"null"`.
+
+This predates v0.4.0 and was untouched by it, but v0.4.0 made it matter: an
+agent was being handed an identifier instead of the data it was supposed to work
+on. Found while verifying that path.
+
 ## v0.4.0 — 2026-10-08
 
 Phase A of the manager-mode plan: **outbound connectors**. An `llm` node now
@@ -117,27 +143,22 @@ with `npm run build` and `npm run standalone:build`.
 
 ## Known issues
 
-### `{{node-id}}` does not interpolate in an LLM prompt
+### The `输出值` field on an output node does nothing
 
-Pre-existing, and untouched by v0.4.0. The compiler emits an `llm` node's prompt
-as a JSON string literal, so `{{input}}` reaches the agent as the sanitized
-**variable name** (`input_n`) rather than the upstream value:
+Pre-existing, and deliberately not changed in v0.4.1.
 
-```js
-agent_n = await agent("say input_n", { phase: "agent" });   // not "say hello"
-```
+`outputValue` is editable in the property panel, stored in the schema, and shown
+as the node's preview on the canvas — but `compile()` never reads it. An output
+node passes its upstream value straight through, so whatever is typed into
+`输出值` has no effect on a run.
 
-Code nodes are unaffected — their body is emitted as raw JavaScript, so the same
-substitution produces a real variable reference. `README.md` and the palette
-description both advertise interpolation for LLM nodes, so this is a genuine gap,
-and it weakens the outbound path added in v0.4.0: an agent receives a prompt
-containing an identifier instead of the data it was meant to work on.
+Fixing it is a behaviour decision rather than a bug fix: the output node's
+pass-through is what makes a branch rejoin work today, so making the field live
+would change what existing saved workflows return. It needs its own call on
+whether the field should template the value, replace it, or leave the panel.
 
-Tracked by a `todo` test, `an llm prompt interpolates the upstream value`, in
-`tests/connectors.test.mjs`. It reports honestly today and becomes an ordinary
-failing/passing test the moment the compiler is fixed. The fix is to build the
-prompt as a concatenation of string literals and variable references instead of
-one `JSON.stringify` of the interpolated text.
+(The other entry here — `{{node-id}}` not interpolating in an `llm` prompt — was
+fixed in v0.4.1.)
 
 ## Tagging policy
 

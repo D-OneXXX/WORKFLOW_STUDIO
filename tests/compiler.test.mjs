@@ -506,3 +506,129 @@ test('demo workflow: llm outline then length branch rejoining one output', async
   const short = await runScript(result.script, { respond: () => '短大纲' })
   assert.equal(short.value.value, '短大纲')
 })
+
+/**
+ * Prompt interpolation. These pin the behaviour that `{{node-id}}` in an `llm`
+ * prompt was missing: the compiler used to `JSON.stringify` the whole
+ * interpolated template, so the agent received the variable *name* as text.
+ */
+
+test('an llm prompt receives the upstream value, not the variable name', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'hello world' } },
+        { id: 'ask', kind: 'llm', params: { prompt: 'say {{in}} now' } },
+        { id: 'out', kind: 'output' },
+      ],
+      [
+        ['in', 'ask'],
+        ['ask', 'out'],
+      ],
+    ),
+  )
+  const seen = []
+  const ran = await runScript(result.script, {
+    respond: (prompt) => {
+      seen.push(prompt)
+      return 'answered'
+    },
+  })
+  assert.deepEqual(seen, ['say hello world now'])
+  assert.equal(ran.value.value, 'answered')
+})
+
+test('a prompt with no reference stays a plain string literal', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'x' } },
+        { id: 'ask', kind: 'llm', params: { prompt: 'no refs here' } },
+        { id: 'out', kind: 'output' },
+      ],
+      [
+        ['in', 'ask'],
+        ['ask', 'out'],
+      ],
+    ),
+  )
+  assert.match(result.script, /agent\("no refs here"/)
+})
+
+test('an upstream agent contract object contributes its output to a prompt', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'seed' } },
+        { id: 'first', kind: 'llm', params: { prompt: 'step one {{in}}' } },
+        { id: 'second', kind: 'llm', params: { prompt: 'step two {{first}}' } },
+        { id: 'out', kind: 'output' },
+      ],
+      [
+        ['in', 'first'],
+        ['first', 'second'],
+        ['second', 'out'],
+      ],
+    ),
+  )
+  const seen = []
+  await runScript(result.script, {
+    respond: (prompt) => {
+      seen.push(prompt)
+      // What an agent node really returns under the phase A result contract.
+      return { output: 'OUTLINE-TEXT', summary: 'one line' }
+    },
+  })
+  assert.deepEqual(seen, ['step one seed', 'step two OUTLINE-TEXT'])
+})
+
+test('a value containing quote characters is text, not script', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: 'x"); injected(); ("' } },
+        { id: 'ask', kind: 'llm', params: { prompt: 'value={{in}}' } },
+        { id: 'out', kind: 'output' },
+      ],
+      [
+        ['in', 'ask'],
+        ['ask', 'out'],
+      ],
+    ),
+  )
+  const seen = []
+  const ran = await runScript(result.script, {
+    respond: (prompt) => {
+      seen.push(prompt)
+      return 'ok'
+    },
+  })
+  // The whole payload must arrive verbatim inside the prompt string, never as
+  // code: the literal parts are JSON-encoded and the value is only referenced.
+  assert.deepEqual(seen, ['value=x"); injected(); ("'])
+  assert.equal(ran.value.value, 'ok')
+})
+
+test('a null upstream becomes empty text rather than "null"', async () => {
+  const result = compile(
+    graph(
+      [
+        { id: 'in', kind: 'input', params: { input: '' } },
+        { id: 'ask', kind: 'llm', params: { prompt: '[{{in}}]' } },
+        { id: 'out', kind: 'output' },
+      ],
+      [
+        ['in', 'ask'],
+        ['ask', 'out'],
+      ],
+    ),
+  )
+  const seen = []
+  await runScript(result.script, {
+    respond: (prompt) => {
+      seen.push(prompt)
+      return 'ok'
+    },
+  })
+  assert.deepEqual(seen, ['[]'])
+})

@@ -196,16 +196,13 @@ test('an agent node runs end to end and its prompt text stays out of the log', a
 })
 
 /**
- * Pre-existing defect, not part of phase A.
- *
- * The compiler JSON-stringifies an llm prompt, so `{{node-id}}` reaches the
- * agent as the literal variable name (`input_n`) instead of the upstream value.
- * Code nodes are unaffected because their body is emitted as raw JavaScript.
- * README and the palette both advertise interpolation for llm nodes, so this is
- * a real gap in the outbound path. Filed as todo: it reports honestly today and
- * becomes an ordinary passing test the moment the compiler is fixed.
+ * The gap that made this whole path half-useless: before v0.4.1 the compiler
+ * JSON-stringified an llm prompt, so `{{node-id}}` reached the agent as the
+ * literal variable name (`input_n`) instead of the upstream value. Kept here as
+ * an end-to-end assertion through a real connector call, with the compiler-level
+ * coverage in `tests/compiler.test.mjs`.
  */
-test('an llm prompt interpolates the upstream value', { todo: true }, async () => {
+test('an llm prompt interpolates the upstream value through the connector', async () => {
   const registry = await registryFor({ json: 'json' })
   const result = await runGraph(llmGraph('json', 'say {{input}}'), { registry })
   assert.equal(result.stopReason, 'completed', result.error ?? '')

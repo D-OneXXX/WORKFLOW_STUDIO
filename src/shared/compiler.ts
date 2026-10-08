@@ -324,6 +324,41 @@ export function compile(graph: WorkflowGraph): CompileResult {
   const interpolate = (template: string): string =>
     template.replace(INTERPOLATION, (_match, id: string) => nameOf(id))
 
+  /**
+   * Render an upstream value as prompt text.
+   *
+   * An agent node hands on the `{ output, summary }` contract, so a prompt that
+   * names one should receive its `output`, not `[object Object]`. Code nodes are
+   * unaffected: they receive the raw value as `input` and can read `.output`
+   * themselves.
+   */
+  const textOf = (name: string): string =>
+    `(${name} == null ? '' : typeof ${name} === 'object' && 'output' in ${name}` +
+    ` ? String(${name}.output) : String(${name}))`
+
+  /**
+   * Compile a template into a JavaScript *expression*.
+   *
+   * `JSON.stringify` of the whole interpolated template would freeze each
+   * `{{id}}` into the variable's name (`"say input_n"`) instead of its value,
+   * because the result is embedded in a string literal. Splitting into literals
+   * joined with variable references is what makes the substitution real.
+   */
+  const templateExpression = (template: string): string => {
+    const parts: string[] = []
+    let cursor = 0
+    for (const match of template.matchAll(INTERPOLATION)) {
+      const at = match.index ?? 0
+      if (at > cursor) parts.push(JSON.stringify(template.slice(cursor, at)))
+      parts.push(textOf(nameOf(match[1]!)))
+      cursor = at + match[0].length
+    }
+    // No reference at all: keep the plain literal, which is cheaper to read.
+    if (parts.length === 0) return JSON.stringify(template)
+    if (cursor < template.length) parts.push(JSON.stringify(template.slice(cursor)))
+    return parts.join(' + ')
+  }
+
   const lines: string[] = []
   const emit = (depth: number, text: string): void => {
     lines.push(`${'  '.repeat(depth)}${text}`)
@@ -354,12 +389,14 @@ export function compile(graph: WorkflowGraph): CompileResult {
         break
       }
       case 'llm': {
-        const rendered = interpolate(node.params?.prompt ?? '')
+        // An expression, not a string literal: the prompt must carry the
+        // upstream values that `{{id}}` names.
+        const promptExpr = templateExpression(node.params?.prompt ?? '')
         emit(depth, `phase(${JSON.stringify(node.id)});`)
         emit(depth, `log(${JSON.stringify(`调用大模型：${node.id}`)});`)
         emit(
           depth,
-          `${slot.name} = await agent(${JSON.stringify(rendered)}, { phase: ${JSON.stringify(node.id)} });`,
+          `${slot.name} = await agent(${promptExpr}, { phase: ${JSON.stringify(node.id)} });`,
         )
         break
       }
