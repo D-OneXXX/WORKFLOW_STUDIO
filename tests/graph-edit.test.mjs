@@ -11,6 +11,7 @@ import test from 'node:test'
 import {
   clearUnknownExecutors,
   copySelection,
+  dropEmptyGroups,
   foldView,
   groupLabel,
   groupSelection,
@@ -23,6 +24,14 @@ import {
   unknownExecutors,
 } from '../lib/shared/graph-edit.js'
 import { compile } from '../lib/shared/compiler.js'
+
+/**
+ * The fallback title a group gets when no member has a label to borrow.
+ *
+ * The real caller passes a formatter bound to the active locale (`group.round`),
+ * which is why this pure module takes the wording instead of holding it.
+ */
+const roundTitle = (round) => `第 ${round} 轮`
 
 /** input → draft → critique → branch → (true) output / (false) polish → output */
 const chain = () => ({
@@ -139,9 +148,9 @@ test('bindings to connectors this machine lacks are reported, never replaced', (
 
 test('grouping takes at least two nodes and names the block after its lead', () => {
   const graph = chain()
-  assert.equal(groupSelection(graph, ['r1']).groupId, undefined, 'one node is not a round')
+  assert.equal(groupSelection(graph, ['r1'], roundTitle).groupId, undefined, 'one node is not a round')
 
-  const grouped = groupSelection(graph, ['r1', 'r2'])
+  const grouped = groupSelection(graph, ['r1', 'r2'], roundTitle)
   assert.equal(grouped.graph.groups.length, 1)
   assert.equal(grouped.graph.groups[0].collapsed, true, 'a new round arrives folded, which is the point')
   assert.equal(grouped.graph.groups[0].label, '初稿', 'the first llm or branch label names the block')
@@ -149,13 +158,67 @@ test('grouping takes at least two nodes and names the block after its lead', () 
     grouped.graph.nodes.filter((node) => node.groupId === grouped.groupId).map((node) => node.id),
     ['r1', 'r2'],
   )
-  assert.deepEqual(groupLabel([{ id: 'x', kind: 'code' }], 3), '第 3 轮', 'a code-only round is numbered')
+  assert.equal(
+    groupLabel([{ id: 'x', kind: 'code' }], roundTitle(3)),
+    '第 3 轮',
+    'a code-only round is titled with the wording the caller passed in',
+  )
+  assert.equal(
+    groupLabel([{ id: 'x', kind: 'code' }, { id: 'y', kind: 'llm', label: '润色' }], roundTitle(1)),
+    '润色',
+    'a labelled member still names the block',
+  )
+})
+
+test('a group outlives its members only as long as it has one', () => {
+  const grouped = groupSelection(chain(), ['r1', 'r2'], roundTitle).graph
+  const groupId = grouped.groups[0].id
+
+  // Deleting one of two rounds leaves the round standing: dissolving it is the
+  // user's decision, not a side effect of a delete.
+  const oneLeft = dropEmptyGroups({
+    ...grouped,
+    nodes: grouped.nodes.filter((node) => node.id !== 'r1'),
+    edges: grouped.edges.filter((edge) => edge.source !== 'r1' && edge.target !== 'r1'),
+  })
+  assert.equal(oneLeft.groups.length, 1, 'a round with one member is still a round')
+  assert.equal(oneLeft.groups[0].id, groupId)
+
+  // Deleting the last one must not leave a record behind: the canvas draws nothing
+  // for it, but it would still be saved with a title that names nodes that are gone.
+  const emptied = dropEmptyGroups({
+    ...oneLeft,
+    nodes: oneLeft.nodes.filter((node) => node.id !== 'r2'),
+    edges: oneLeft.edges.filter((edge) => edge.source !== 'r2' && edge.target !== 'r2'),
+  })
+  assert.deepEqual(emptied.groups, [], 'the emptied group is no longer in the document')
+  assert.equal(emptied.nodes.some((node) => node.groupId === groupId), false)
+  // The same holds for a chain that stays compilable: dropping the last member of
+  // a round must not leave the record behind, whatever else the graph can do.
+  const tail = {
+    nodes: [
+      { id: 'in', kind: 'input', params: { input: 'x' } },
+      { id: 'r', kind: 'llm', label: '改写', params: { prompt: '{{in}}' }, groupId: 'g1' },
+      { id: 'out', kind: 'output' },
+    ],
+    edges: [{ id: 'a', source: 'in', target: 'r' }, { id: 'b', source: 'r', target: 'out' }],
+    groups: [{ id: 'g1', label: '第 1 轮', collapsed: true }],
+  }
+  const cleaned = dropEmptyGroups({ ...tail, nodes: tail.nodes.filter((node) => node.id !== 'r') })
+  assert.deepEqual(cleaned.groups, [], 'the group named a node that no longer exists')
+  assert.equal(compile({ ...cleaned, edges: [{ id: 'a2', source: 'in', target: 'out' }] }).order.length, 2)
+
+  // Nothing to prune means the same object comes back, so a delete that touches no
+  // group cannot churn the document.
+  const withoutGroups = chain()
+  assert.equal(dropEmptyGroups(withoutGroups) === withoutGroups, true, 'no groups at all: returned as it was')
+  assert.equal(dropEmptyGroups(oneLeft) === oneLeft, true, 'a group that still has members: returned as it was')
 })
 
 test('re-grouping moves nodes and drops the round they left behind', () => {
   const graph = chain()
-  const first = groupSelection(graph, ['r1', 'r2']).graph
-  const second = groupSelection(first, ['r1', 'r2', 'q']).graph
+  const first = groupSelection(graph, ['r1', 'r2'], roundTitle).graph
+  const second = groupSelection(first, ['r1', 'r2', 'q'], roundTitle).graph
   assert.equal(second.groups.length, 1, 'the emptied group is not left dangling')
   assert.equal(second.nodes.filter((node) => node.groupId === first.groups[0].id).length, 0)
 
@@ -165,7 +228,7 @@ test('re-grouping moves nodes and drops the round they left behind', () => {
 })
 
 test('collapsing and renaming are the only things a fold writes', () => {
-  const graph = groupSelection(chain(), ['r1', 'r2']).graph
+  const graph = groupSelection(chain(), ['r1', 'r2'], roundTitle).graph
   const opened = setCollapsed(graph, graph.groups[0].id, false)
   assert.equal(opened.groups[0].collapsed, false)
   assert.equal(JSON.stringify(opened.nodes), JSON.stringify(graph.nodes), 'no node moved or changed')
@@ -183,7 +246,7 @@ test('a folded block hides its members and takes over their outer edges', () => 
       { id: 'e9', source: 'out', target: 'r1' },
     ],
   }
-  const grouped = groupSelection(graph, ['r1', 'r2']).graph
+  const grouped = groupSelection(graph, ['r1', 'r2'], roundTitle).graph
   const view = foldView(grouped)
 
   const visible = view.nodes.filter((node) => !isGroupBlock(node)).map((node) => node.id)
@@ -206,7 +269,7 @@ test('a folded block hides its members and takes over their outer edges', () => 
 test('an unfolded graph is drawn exactly as it is stored', () => {
   const graph = chain()
   assert.deepEqual(foldView(graph), { nodes: graph.nodes, edges: graph.edges })
-  const grouped = groupSelection(graph, ['r1', 'r2']).graph
+  const grouped = groupSelection(graph, ['r1', 'r2'], roundTitle).graph
   assert.deepEqual(foldView(setCollapsed(grouped, grouped.groups[0].id, false)), {
     nodes: grouped.nodes,
     edges: grouped.edges,
@@ -215,7 +278,7 @@ test('an unfolded graph is drawn exactly as it is stored', () => {
 
 test('folding changes nothing the compiler sees', () => {
   const graph = chain()
-  const grouped = groupSelection(graph, ['r1', 'r2']).graph
+  const grouped = groupSelection(graph, ['r1', 'r2'], roundTitle).graph
   const folded = setCollapsed(grouped, grouped.groups[0].id, true)
   const unfolded = setCollapsed(grouped, grouped.groups[0].id, false)
 

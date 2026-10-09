@@ -34,7 +34,14 @@ import {
   type NodeProps,
 } from '@xyflow/react'
 
-import { foldView, isGroupBlock, type GroupBlock, type ViewNode } from './graph-edit.js'
+import {
+  foldView,
+  GROUP_PREFIX,
+  groupIdOf,
+  isGroupBlock,
+  type GroupBlock,
+  type ViewNode,
+} from './graph-edit.js'
 import type { NodeKind, WorkflowEdge, WorkflowGraph, WorkflowNode } from './types.js'
 
 /** Data carried by each rendered node. */
@@ -214,8 +221,8 @@ function toFlowEdges(graph: { edges: WorkflowEdge[] }): Edge[] {
     target: edge.target,
     sourceHandle: edge.sourceHandle ?? null,
     // A folded block has one stub handle, whatever arm the edge came from.
-    targetHandle: edge.target.startsWith('group:') ? null : 'in',
-    label: edge.source.startsWith('group:') ? undefined : (edge.sourceHandle ?? undefined),
+    targetHandle: edge.target.startsWith(GROUP_PREFIX) ? null : 'in',
+    label: edge.source.startsWith(GROUP_PREFIX) ? undefined : (edge.sourceHandle ?? undefined),
   }))
 }
 
@@ -295,7 +302,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
       if (!connection.source || !connection.target) return
       if (connection.source === connection.target) return
       // Neither end may be a folded block: see the note on StudioGroupView.
-      if (connection.source.startsWith('group:') || connection.target.startsWith('group:')) return
+      if (connection.source.startsWith(GROUP_PREFIX) || connection.target.startsWith(GROUP_PREFIX)) return
       props.onConnect({
         id: edgeId(connection),
         source: connection.source,
@@ -308,8 +315,9 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
 
   const onNodeDoubleClick = React.useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      if (!node.id.startsWith('group:')) return
-      props.onToggleGroup(node.id.slice('group:'.length), false)
+      const groupId = groupIdOf(node.id)
+      if (groupId === undefined) return
+      props.onToggleGroup(groupId, false)
       // Bring the members into view, so the expansion is not off-screen.
       void flow.fitView({ nodes: [{ id: node.id }], duration: 200, maxZoom: 1.2 })
     },

@@ -1,6 +1,6 @@
 {
   "name": "dsh-workflow-studio",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Visual workflow studio for DeepSeek Harness: drag-and-drop DAG authoring, compile, and one-click run.",
   "type": "module",

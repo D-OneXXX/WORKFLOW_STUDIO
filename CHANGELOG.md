@@ -7,6 +7,41 @@ on `main`.
 This project carries **three unrelated version numbers**. They must not be
 bumped together. See [Version identity](#version-identity) below.
 
+## v0.7.1 — 2026-10-09
+
+A review pass over v0.7.0 with
+[`open-code-review`](https://github.com/alibaba/open-code-review) (`ocr delegate`,
+which publishes the review rules instead of calling a model). Four findings, one of
+them a real regression.
+
+* **Deleting any node wiped every node group.** `removeNode` rebuilt the graph as
+  `{ nodes, edges }` instead of spreading the current document, so the `groups` array
+  went with it: fold a round, delete an unrelated node, and the round is gone while
+  its members keep a `groupId` that names nothing. Every other edit already spread
+  `...current` — this was the one that did not, and the fix is that spread.
+* **`dropEmptyGroups`** now also removes a group whose last member is deleted, so the
+  document no longer carries a record with a stale title. A group down to one member
+  is deliberately kept: dissolving a round is a decision, not a side effect of a
+  delete.
+* **The block id prefix is no longer duplicated.** `canvas.tsx` compared against five
+  literal `'group:'` strings and re-implemented `groupIdOf` as
+  `slice('group:'.length)`, while `graph-edit.ts` already exported both. A prefix that
+  drifts fails silently, so it now comes from the one place that defines it.
+* **The fallback group title is localized.** `groupLabel` held a literal
+  `` `第 ${round} 轮` `` inside a pure, language-agnostic module — which made the
+  English UI show Chinese and left `group.round` dead in both locale files. The
+  caller passes a formatter bound to the active locale instead.
+* **The clipboard listener binds once.** The `Ctrl`/`Cmd`+C/V effect depended on the
+  whole studio state, which `useStudio` rebuilds every render, so the window listener
+  was detached and re-attached on each one. It reads the current state through a ref
+  refreshed after every render now.
+
+Tests: 149 in `npm run test` (up from 148 — the group-lifecycle test covers both the
+one-member keep and the emptied drop) and 8 in `npm run standalone:test`. Re-verified
+in a real browser: fold, double-click expand through `groupIdOf`, the panel's
+展开/折叠 toggle, and copy then two pastes through the single listener, with no page
+errors.
+
 ## v0.7.0 — 2026-10-09
 
 Repetition is drawn. A round chain — 初稿 → 批评改写 → 判断 → 润色 — is built from
@@ -364,7 +399,7 @@ commit is therefore tagged `v0.2.0`, and this entry preserves the chronology.
 
 | Number | Where | Meaning | Consequence of bumping |
 |---|---|---|---|
-| `0.7.0` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
+| `0.7.1` | `package.json`, mirrored in `package-lock.json` (root and `packages[""]`) | Release version. Read at runtime by one place: `standalone/mcp.mjs` reports it in the MCP handshake, deliberately by parsing `package.json` rather than repeating the literal. | Safe. `scripts/lint.mjs` asserts the package name, `type`, `private`, the bundle patch dialect, `exports` and the wire vocabulary — never the version. Keep the two lockfile fields in lockstep; `tests/mcp.test.mjs` asserts the handshake agrees with `package.json`. |
 | `"version": 1` | Exported documents: `{ "format": "dsh-workflow-studio", "version": 1 }` | **Document schema revision.** Validated by `z.literal(1)` in `standalone/store.mjs`, reached from `/api/import` and `/api/export`. | Rejects every existing export, including `standalone/examples/local-workflow.json`. `tests/standalone.test.mjs` pins `version: 2` as rejected, so a bump fails that test by design. Requires a migration. |
 | `version: 1` | Storage domain in `src/host/service.ts` | **Plugin storage compatibility** for the `dsh_workflow` domain. | Bumping without populating `compatibleVersions` makes already-stored records unreadable. |
 

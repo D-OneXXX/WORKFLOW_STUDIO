@@ -219,11 +219,18 @@ export function clearUnknownExecutors(graph: WorkflowGraph, known: readonly stri
   }
 }
 
-/** The default block title: the first llm or branch label, else 第 N 轮. */
-export function groupLabel(members: readonly WorkflowNode[], round: number): string {
+/**
+ * The default block title: the first llm or branch label, else this round's
+ * localized fallback.
+ *
+ * The fallback text is handed in rather than written here. This module is pure and
+ * shared by both languages, so a literal 第 N 轮 would put Chinese-only wording into
+ * the English UI — and the `group.round` key in the locale files would be dead.
+ */
+export function groupLabel(members: readonly WorkflowNode[], roundTitle: string): string {
   const lead = members.find((node) => node.kind === 'llm' || node.kind === 'branch')
   if (lead?.label !== undefined && lead.label.length > 0) return lead.label
-  return `第 ${round} 轮`
+  return roundTitle
 }
 
 /**
@@ -233,10 +240,14 @@ export function groupLabel(members: readonly WorkflowNode[], round: number): str
  * selection's previous membership is replaced, and a group this move empties is
  * dropped rather than left as an empty list entry. Nesting is out of scope: a group
  * inside a group needs a fold order, and the round chains this is for are flat.
+ *
+ * @param roundTitle - names a group that has no label to borrow, given its round
+ *   number; supplied by the caller so it comes from the active locale.
  */
 export function groupSelection(
   graph: WorkflowGraph,
   ids: readonly string[],
+  roundTitle: (round: number) => string,
 ): { graph: WorkflowGraph; groupId?: string } {
   const selected = new Set(ids)
   const members = graph.nodes.filter((node) => selected.has(node.id))
@@ -253,9 +264,24 @@ export function groupSelection(
     graph: {
       ...graph,
       nodes: graph.nodes.map((node) => (selected.has(node.id) ? { ...node, groupId: id } : node)),
-      groups: [...survivors, { id, label: groupLabel(members, survivors.length + 1), collapsed: true }],
+      groups: [...survivors, { id, label: groupLabel(members, roundTitle(survivors.length + 1)), collapsed: true }],
     },
   }
+}
+
+/**
+ * Drop group records that no longer have a member node.
+ *
+ * Deleting the last node of a round leaves the group behind in the document: the
+ * canvas shows nothing (a folded block is drawn from its members), yet the record
+ * is saved, and its title is stale. A group down to one member is *kept* — it is
+ * still a round the user made, and dissolving it is their call, not a side effect
+ * of a delete.
+ */
+export function dropEmptyGroups(graph: WorkflowGraph): WorkflowGraph {
+  const groups = graph.groups ?? []
+  const kept = groups.filter((group) => graph.nodes.some((node) => node.groupId === group.id))
+  return kept.length === groups.length ? graph : { ...graph, groups: kept }
 }
 
 /** Take the nodes out of a group and drop the group. */

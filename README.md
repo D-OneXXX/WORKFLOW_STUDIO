@@ -271,6 +271,9 @@ Four things make a drawn chain usable at three rounds deep:
   A block shows the stubs its members have but accepts no new connection, since
   which member a wire should reach is not derivable from something folded; expand
   it first. The title defaults to the first llm or branch label, and is editable.
+  Deleting a node leaves the other rounds alone, and a group whose last member is
+  deleted goes with it; a round down to one node is kept, because dissolving it is
+  your call, not a side effect of a delete.
   **Folding is a view**: no node and no edge leaves the graph, and the compiled
   script is byte-identical folded or unfolded — a test asserts exactly that.
 

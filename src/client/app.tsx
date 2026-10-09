@@ -77,6 +77,19 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
   const [exportedJson, setExportedJson] = React.useState<string>()
 
   /**
+   * The latest state, for the keydown listener below.
+   *
+   * `useStudio` returns a fresh object every render, so depending on it would
+   * detach and re-attach the window listener on each one — correct, but pointless
+   * churn on the hottest path in the editor. One binding instead, reading through a
+   * ref that is refreshed after every render.
+   */
+  const latest = React.useRef(state)
+  React.useEffect(() => {
+    latest.current = state
+  })
+
+  /**
    * Ctrl/Cmd+C and Ctrl/Cmd+V on the canvas.
    *
    * While a text field has focus the keystroke belongs to the field: someone
@@ -91,19 +104,20 @@ export function WorkflowPanel({ ctx, rpc, mountError, sampleOverride, importDocu
       return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable
     }
     const onKey = (event: KeyboardEvent) => {
+      const studio = latest.current
       if (!(event.ctrlKey || event.metaKey) || editing(event.target)) return
       const key = event.key.toLowerCase()
-      if (key === 'c' && state.selection.length > 0) {
+      if (key === 'c' && studio.selection.length > 0) {
         event.preventDefault()
-        state.copy()
-      } else if (key === 'v' && state.canPaste) {
+        studio.copy()
+      } else if (key === 'v' && studio.canPaste) {
         event.preventDefault()
-        state.paste()
+        studio.paste()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [state])
+  }, [])
 
   const exportDocument = () => {
     try {

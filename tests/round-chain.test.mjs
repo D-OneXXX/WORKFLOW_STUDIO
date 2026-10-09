@@ -41,6 +41,9 @@ import { WorkflowStore } from '../standalone/store.mjs'
 
 const PROGRAM = `"${process.execPath.replace(/\\/g, '/')}"`
 
+/** What the panel passes as the group's fallback title, in the active locale. */
+const roundTitle = (round) => `第 ${round} 轮`
+
 /** A registry whose default connector is the fake CLI, so no model is called. */
 async function fakeRegistry() {
   const dir = await mkdtemp(join(tmpdir(), 'wfs-chain-'))
@@ -165,7 +168,7 @@ test('groups and membership are stored, not just drawn', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wfs-store-'))
   try {
     const store = await WorkflowStore.open(dir)
-    const graph = groupSelection(roundChainGraph(), ['round1', 'round2']).graph
+    const graph = groupSelection(roundChainGraph(), ['round1', 'round2'], roundTitle).graph
     const groupId = graph.groups[0].id
     assert.equal(graph.nodes.filter((node) => node.groupId === groupId).length, 2)
 
@@ -187,7 +190,7 @@ test('groups and membership are stored, not just drawn', async () => {
 
 test('folding the rounds is a view: the same script either way', () => {
   const graph = roundChainGraph()
-  const grouped = groupSelection(graph, ['round1', 'round2']).graph
+  const grouped = groupSelection(graph, ['round1', 'round2'], roundTitle).graph
   const folded = setCollapsed(grouped, grouped.groups[0].id, true)
   const expanded = setCollapsed(grouped, grouped.groups[0].id, false)
 

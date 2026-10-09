@@ -20,6 +20,7 @@ import { failureMessage, type ClientContextLike, type WorkflowRpc } from './remo
 import {
   clearUnknownExecutors,
   copySelection,
+  dropEmptyGroups,
   flowIdOfGroup,
   groupIdOf,
   mergeWorkflow,
@@ -284,7 +285,12 @@ export function useStudio(
 
   const removeNode = useCallback(
     (id: string) => {
-      edit((current) => ({
+      // `...current` matters: a graph is nodes, edges *and* groups, and rebuilding
+      // the object from scratch here used to drop every group the moment any node
+      // was deleted. A group whose last member goes is dropped on purpose — that one
+      // has nothing left to draw.
+      edit((current) => dropEmptyGroups({
+        ...current,
         nodes: current.nodes.filter((node) => node.id !== id),
         edges: current.edges.filter((edge) => edge.source !== id && edge.target !== id),
       }))
@@ -411,7 +417,9 @@ export function useStudio(
 
   const groupNodes = useCallback(() => {
     const ids = selection.filter((id) => groupIdOf(id) === undefined)
-    const result = groupSelection(graph, ids)
+    // The round number is only known inside the grouping, so the title comes as a
+    // formatter bound to the active locale.
+    const result = groupSelection(graph, ids, (round) => bind('group.round', { n: round }))
     if (result.groupId === undefined) {
       setStatus({ kind: 'warn', text: bind('status.groupNeedsTwo') })
       return
